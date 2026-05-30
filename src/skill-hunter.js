@@ -3,12 +3,17 @@
 /**
  * Skill 搜集引擎 — 从多个信息源搜集最新的 Claude Code skill 信息
  *
- * 当前实现：GitHub API（无认证，rate limit 60次/小时）
+ * 当前实现：GitHub API（支持 Token 认证，有 token 时 5000/h，无 token 时 60/h）
+ * 自适应节流：解析 X-RateLimit-* 响应头，remaining <= 5 时自动等待
+ * 磁盘缓存：data/skills/cache/{hash}.json，TTL 2 小时，进程重启不丢失
  * 预留接口：X/Twitter、官方/社区源
  */
 
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -17,7 +22,9 @@ const GITHUB_API_BASE = 'https://api.github.com';
 const REQUEST_TIMEOUT_MS = 15000;       // 单个请求超时 15s
 const MIN_HUNT_INTERVAL_MS = 60 * 1000; // 最少间隔 1 分钟
 const MAX_CONCURRENT = 3;               // 最大并发数
-const CACHE_TTL_MS = 30 * 60 * 1000;    // 缓存有效期 30 分钟
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 磁盘缓存有效期 2 小时
+const RATE_LIMIT_THRESHOLD = 5;          // 剩余次数低于此值触发节流等待
+const CACHE_DIR = path.resolve(__dirname, '..', 'data', 'skills', 'cache');
 
 // GitHub 搜索 URL 列表
 const SEARCH_URLS = [
@@ -40,6 +47,40 @@ const CATEGORY_KEYWORDS = [
 // ---------------------------------------------------------------------------
 
 /**
+ * 解析响应中的 rate limit 信息，必要时等待
+ * 有 token 时 5000/h，无 token 时 60/h
+ * @param {Object} resHeaders - 响应头
+ */
+function handleRateLimit(resHeaders) {
+  const remaining = parseInt(resHeaders['x-ratelimit-remaining'], 10);
+  const resetEpoch = parseInt(resHeaders['x-ratelimit-reset'], 10);
+
+  if (!isNaN(remaining) && !isNaN(resetEpoch) && remaining <= RATE_LIMIT_THRESHOLD) {
+    const waitMs = Math.max(0, resetEpoch * 1000 - Date.now()) + 1000; // 多等 1s 避免边界
+    console.warn(`[skill-hunter] Rate limit 接近耗尽 (remaining=${remaining})，等待 ${Math.ceil(waitMs / 1000)}s 至 reset`);
+    return new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+
+  return Promise.resolve();
+}
+
+/**
+ * 构建 GitHub API 请求头（有 token 时附加认证）
+ * @returns {Object}
+ */
+function buildGitHubHeaders() {
+  const headers = {
+    'User-Agent': 'cc-butler/0.1.0',
+    'Accept': 'application/vnd.github.v3+json',
+  };
+  const token = process.env.GITHUB_TOKEN;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+/**
  * 发起 HTTPS/HTTP GET 请求，返回 JSON
  * @param {string} url - 请求 URL
  * @param {Object} [headers] - 额外请求头
@@ -51,14 +92,14 @@ function fetchJSON(url, headers = {}) {
       req.destroy(new Error(`请求超时: ${url}`));
     }, REQUEST_TIMEOUT_MS);
 
+    // 合并基础请求头（含认证）和调用方传入的额外头
+    const mergedHeaders = { ...buildGitHubHeaders(), ...headers };
+
     const mod = url.startsWith('https') ? https : http;
-    const req = mod.get(url, {
-      headers: {
-        'User-Agent': 'cc-butler/0.1.0',
-        'Accept': 'application/vnd.github.v3+json',
-        ...headers,
-      },
-    }, (res) => {
+    const req = mod.get(url, { headers: mergedHeaders }, (res) => {
+      // Rate limit 自适应节流：每次响应后检查剩余额度
+      handleRateLimit(res.headers).catch(() => {});
+
       // 处理重定向
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         clearTimeout(timer);
@@ -194,25 +235,78 @@ async function checkSkillMd(fullName) {
 }
 
 // ---------------------------------------------------------------------------
-// 缓存层 — 避免重复请求消耗 rate limit
+// 缓存层 — 磁盘持久化缓存，避免重复请求消耗 rate limit，进程重启不丢失
 // ---------------------------------------------------------------------------
-const responseCache = new Map();
 
 /**
- * 带缓存的 fetchJSON
+ * 确保 cache 目录存在
+ */
+function ensureCacheDir() {
+  if (!fs.existsSync(CACHE_DIR)) {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+  }
+}
+
+/**
+ * 根据 URL 生成缓存文件路径
+ * @param {string} url
+ * @returns {string}
+ */
+function cacheFilePath(url) {
+  const hash = crypto.createHash('sha256').update(url).digest('hex').slice(0, 16);
+  return path.join(CACHE_DIR, `${hash}.json`);
+}
+
+/**
+ * 从磁盘读取缓存，过期或不存在返回 null
+ * @param {string} url
+ * @returns {Object|null}
+ */
+function readCache(url) {
+  try {
+    const filePath = cacheFilePath(url);
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const cached = JSON.parse(raw);
+    if (Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+    // TTL 过期，删除文件
+    try { fs.unlinkSync(filePath); } catch { /* 忽略删除失败 */ }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 将数据写入磁盘缓存
+ * @param {string} url
+ * @param {Object} data
+ */
+function writeCache(url, data) {
+  try {
+    ensureCacheDir();
+    const filePath = cacheFilePath(url);
+    fs.writeFileSync(filePath, JSON.stringify({ data, timestamp: Date.now() }), 'utf-8');
+  } catch (err) {
+    // 缓存写入失败不影响主流程
+    console.warn(`[skill-hunter] 缓存写入失败: ${err.message}`);
+  }
+}
+
+/**
+ * 带磁盘缓存的 fetchJSON
  * @param {string} url
  * @param {Object} [headers]
  * @returns {Promise<Object>}
  */
 async function cachedFetch(url, headers) {
-  const now = Date.now();
-  const cached = responseCache.get(url);
-  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
-  }
+  const cached = readCache(url);
+  if (cached) return cached;
 
   const data = await fetchJSON(url, headers);
-  responseCache.set(url, { data, timestamp: now });
+  writeCache(url, data);
   return data;
 }
 

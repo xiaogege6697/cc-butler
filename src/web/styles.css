@@ -344,83 +344,207 @@ body::before {
 }
 
 /* =========================================================================
-   Deployment 列表
+   Deployment 可拖动卡片
    ========================================================================= */
 .card--deployment-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
-.deployment-row {
+/* 单个部署卡片 */
+.dep-card {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
-  padding: 10px 14px;
-  background: var(--bg-input);
-  border-radius: var(--radius-sm);
-  border: 1.5px solid rgba(233, 69, 96, 0.15);
-  transition: background var(--transition-fast);
+  padding: 16px 20px;
+  background: var(--bg-card);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-comic);
+  cursor: grab;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.2s ease,
+              opacity 0.2s ease;
+  user-select: none;
 }
 
-.deployment-row:hover {
-  background: var(--bg-card-hover);
+/* 漫画半色调网点继承自 .card */
+.dep-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 8px 8px;
+  border-radius: inherit;
+  pointer-events: none;
 }
 
-.deployment-row__info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
+.dep-card:hover {
+  box-shadow: var(--shadow-comic-hover);
 }
 
-.deployment-row__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.dep-card:active {
+  cursor: grabbing;
 }
 
-.deployment-row__dot--healthy {
-  background: var(--accent-green);
-  box-shadow: 0 0 6px var(--accent-green);
+/* 拖动中样式 */
+.dep-card.is-dragging {
+  opacity: 0.5;
+  transform: scale(1.03) rotate(2deg);
+  box-shadow: 10px 10px 20px rgba(0, 0, 0, 0.4);
+  z-index: 50;
 }
 
-.deployment-row__dot--cooldown {
-  background: var(--accent-yellow);
-  box-shadow: 0 0 6px var(--accent-yellow);
-}
-
-.deployment-row__dot--unhealthy {
-  background: var(--accent-red);
-  box-shadow: 0 0 6px var(--accent-red);
-}
-
-.deployment-row__dot--disabled {
-  background: var(--text-dim);
+/* 拖动占位符 — 虚线边框 */
+.dep-card.is-placeholder {
+  border: 3px dashed var(--border-color);
+  background: rgba(233, 69, 96, 0.04);
   box-shadow: none;
+  opacity: 0.6;
+  min-height: 80px;
 }
 
-.deployment-row__name {
-  font-size: 14px;
-  font-weight: 600;
+.dep-card.is-placeholder::before {
+  display: none;
+}
+
+/* 卡片顶部：名称 + 模型 + 健康指示器 */
+.dep-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dep-card__title-area {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dep-card__name {
+  font-size: 15px;
+  font-weight: 700;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.deployment-row__order {
+.dep-card__model {
   font-size: 12px;
-  color: var(--text-dim);
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-family: "SF Mono", "Menlo", "Consolas", monospace;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.deployment-row__status {
-  font-size: 13px;
-  white-space: nowrap;
+.dep-card__health {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* 卡片中部：余额进度条 */
+.dep-card__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dep-card__progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dep-card__progress-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dep-card__progress-value {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dep-card__bar-wrap {
+  width: 100%;
+  height: 10px;
+  background: var(--bg-input);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, 0.05);
+}
+
+.dep-card__bar {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.6s ease;
+  min-width: 2%;
+}
+
+.dep-card__bar--green {
+  background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+}
+
+.dep-card__bar--yellow {
+  background: linear-gradient(90deg, #ffd700, #ff8c42);
+}
+
+.dep-card__bar--red {
+  background: linear-gradient(90deg, #ff4757, #ff6b81);
+}
+
+/* 卡片底部：order 标签 + toggle */
+.dep-card__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dep-card__order-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-purple);
+  border: 2px solid var(--accent-purple);
+  border-radius: 20px;
+  background: rgba(168, 85, 247, 0.08);
+  letter-spacing: 0.5px;
+}
+
+/* 拖拽手柄图标 */
+.dep-card__drag-handle {
+  position: absolute;
+  top: 12px;
+  right: 60px;
+  font-size: 14px;
+  color: var(--text-dim);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.dep-card:hover .dep-card__drag-handle {
+  opacity: 0.6;
 }
 
 /* =========================================================================
@@ -888,10 +1012,18 @@ body::before {
     padding: 12px 14px;
   }
 
-  .deployment-row {
+  .dep-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .dep-card__top {
+    flex-wrap: wrap;
+  }
+
+  .dep-card__bottom {
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px;
   }
 
   .request-item {

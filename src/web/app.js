@@ -32,8 +32,10 @@
   let reconnectDelay = 1000;       // 初始退避 1s
   var MAX_RECONNECT_DELAY = 30000; // 最大退避 30s
   let deployments = [];
+  let tokenStatus = {};       // { [id]: { balance, totalQuota, usedQuota, percentage } }
   let requests = [];
   let config = {};
+  var dragState = null;        // 拖动排序状态
 
   // rAF 合并渲染标记
   var renderScheduled = false;
@@ -174,7 +176,7 @@
   }
 
   // ==========================================================================
-  // 渲染：Deployment 列表
+  // 渲染：Deployment 可拖动卡片
   // ==========================================================================
 
   function renderDeployments() {
@@ -183,27 +185,72 @@
       return;
     }
 
-    dom.deploymentList.innerHTML = deployments.map(function (d) {
-      var dotClass = healthDotClass(d);
-      var statusEmojiStr = '';
-      if (!d.enabled) statusEmojiStr = '💤 已禁用';
-      else if (d.health && !d.health.isHealthy) statusEmojiStr = '❄️ 冷却中';
-      else if (d.health && d.health.consecutiveFailures > 0) statusEmojiStr = '⚠️ ' + d.health.consecutiveFailures + '次失败';
-      else statusEmojiStr = '😊 正常';
+    // 按 order 排序
+    var sorted = deployments.slice().sort(function (a, b) { return a.order - b.order; });
+
+    dom.deploymentList.innerHTML = sorted.map(function (d, index) {
+      // 健康指示器 emoji
+      var healthEmoji = '';
+      if (!d.enabled) healthEmoji = '💤';
+      else if (d.health && !d.health.isHealthy) healthEmoji = '❄️';
+      else if (d.health && d.health.consecutiveFailures > 0) healthEmoji = '⚠️';
+      else healthEmoji = '🟢';
+
+      // token 余额进度条
+      var tokenData = tokenStatus[d.id];
+      var percent = 0;
+      var barClass = 'dep-card__bar--green';
+      var balanceText = '无余额数据';
+
+      if (tokenData && tokenData.percentage != null) {
+        percent = Math.round(tokenData.percentage);
+        balanceText = (tokenData.usedQuota != null && tokenData.totalQuota != null)
+          ? tokenData.usedQuota.toFixed(1) + ' / ' + tokenData.totalQuota.toFixed(1)
+          : percent + '%';
+      } else if (tokenData && tokenData.balance != null) {
+        // 有余额但无 percentage，估算
+        percent = Math.min(100, Math.max(0, Math.round(tokenData.balance)));
+        balanceText = '余额 ' + tokenData.balance.toFixed(1);
+      }
+
+      if (percent < 30) barClass = 'dep-card__bar--red';
+      else if (percent < 60) barClass = 'dep-card__bar--yellow';
+
+      if (!d.enabled) {
+        barClass = 'dep-card__bar--red';
+      }
+
+      // 颜色值用于百分比文字
+      var percentColor = barClass.includes('green') ? 'var(--accent-green)'
+        : barClass.includes('yellow') ? 'var(--accent-yellow)' : 'var(--accent-red)';
 
       return (
-        '<div class="deployment-row" data-id="' + d.id + '">' +
-          '<div class="deployment-row__info">' +
-            '<span class="deployment-row__dot deployment-row__dot--' + dotClass + '"></span>' +
-            '<span class="deployment-row__name">' + escapeHtml(d.name) + '</span>' +
-            '<span class="deployment-row__order">order:' + d.order + '</span>' +
+        '<div class="dep-card" draggable="true" data-id="' + d.id + '" data-order="' + d.order + '">' +
+          '<span class="dep-card__drag-handle" title="拖动排序">⠿</span>' +
+          '<div class="dep-card__top">' +
+            '<div class="dep-card__title-area">' +
+              '<div class="dep-card__name">' + escapeHtml(d.name) + '</div>' +
+              '<div class="dep-card__model">' + escapeHtml(d.model || d.baseUrl || '--') + '</div>' +
+            '</div>' +
+            '<span class="dep-card__health" title="' + healthEmoji + '">' + healthEmoji + '</span>' +
           '</div>' +
-          '<span class="deployment-row__status">' + statusEmojiStr + '</span>' +
-          '<label class="toggle">' +
-            '<input type="checkbox" class="js-deployment-toggle" data-id="' + d.id + '"' +
-              (d.enabled ? ' checked' : '') + '>' +
-            '<span class="toggle__track"><span class="toggle__thumb"></span></span>' +
-          '</label>' +
+          '<div class="dep-card__progress">' +
+            '<div class="dep-card__progress-header">' +
+              '<span class="dep-card__progress-label">余额</span>' +
+              '<span class="dep-card__progress-value" style="color:' + percentColor + '">' + balanceText + '</span>' +
+            '</div>' +
+            '<div class="dep-card__bar-wrap">' +
+              '<div class="dep-card__bar ' + barClass + '" style="width:' + percent + '%"></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="dep-card__bottom">' +
+            '<span class="dep-card__order-tag">P' + d.order + '</span>' +
+            '<label class="toggle" onclick="event.stopPropagation()">' +
+              '<input type="checkbox" class="js-deployment-toggle" data-id="' + d.id + '"' +
+                (d.enabled ? ' checked' : '') + '>' +
+              '<span class="toggle__track"><span class="toggle__thumb"></span></span>' +
+            '</label>' +
+          '</div>' +
         '</div>'
       );
     }).join('');
@@ -223,6 +270,129 @@
           }.bind(this));
       });
     });
+
+    // 绑定拖动事件
+    bindDragEvents();
+  }
+
+  // ==========================================================================
+  // 拖动排序逻辑
+  // ==========================================================================
+
+  function bindDragEvents() {
+    var cards = dom.deploymentList.querySelectorAll('.dep-card');
+    cards.forEach(function (card) {
+      card.addEventListener('dragstart', onDragStart);
+      card.addEventListener('dragend', onDragEnd);
+      card.addEventListener('dragover', onDragOver);
+      card.addEventListener('dragleave', onDragLeave);
+      card.addEventListener('drop', onDrop);
+    });
+  }
+
+  function onDragStart(e) {
+    var card = e.currentTarget;
+    dragState = { id: card.dataset.id, el: card };
+    card.classList.add('is-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', card.dataset.id);
+
+    // 延迟设置拖动样式，避免截图问题
+    requestAnimationFrame(function () {
+      card.classList.add('is-dragging');
+    });
+  }
+
+  function onDragEnd(e) {
+    var card = e.currentTarget;
+    card.classList.remove('is-dragging');
+    // 清除所有占位符
+    dom.deploymentList.querySelectorAll('.is-placeholder').forEach(function (el) {
+      el.classList.remove('is-placeholder');
+    });
+    dragState = null;
+  }
+
+  function onDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    var target = e.currentTarget;
+    // 跳过自身
+    if (dragState && target.dataset.id === dragState.id) return;
+
+    // 清除其他占位符
+    dom.deploymentList.querySelectorAll('.is-placeholder').forEach(function (el) {
+      if (el !== target) el.classList.remove('is-placeholder');
+    });
+
+    target.classList.add('is-placeholder');
+  }
+
+  function onDragLeave(e) {
+    var target = e.currentTarget;
+    // 只在真正离开时移除（排除子元素触发）
+    if (!target.contains(e.relatedTarget)) {
+      target.classList.remove('is-placeholder');
+    }
+  }
+
+  function onDrop(e) {
+    e.preventDefault();
+    var target = e.currentTarget;
+    target.classList.remove('is-placeholder');
+
+    if (!dragState || target.dataset.id === dragState.id) return;
+
+    var draggedId = dragState.id;
+    var targetId = target.dataset.id;
+
+    // 根据 DOM 顺序重新计算 order
+    reorderDeployments(draggedId, targetId);
+  }
+
+  function reorderDeployments(draggedId, targetId) {
+    // 复制并按当前 order 排序
+    var sorted = deployments.slice().sort(function (a, b) { return a.order - b.order; });
+    var draggedIndex = sorted.findIndex(function (d) { return d.id === draggedId; });
+    var targetIndex = sorted.findIndex(function (d) { return d.id === targetId; });
+
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    // 从数组中移除被拖动的元素，插入到目标位置
+    var dragged = sorted.splice(draggedIndex, 1)[0];
+    sorted.splice(targetIndex, 0, dragged);
+
+    // 重新分配 order（从 1 开始）
+    var updates = [];
+    sorted.forEach(function (d, i) {
+      var newOrder = i + 1;
+      if (d.order !== newOrder) {
+        d.order = newOrder;
+        updates.push({ id: d.id, order: newOrder });
+      }
+    });
+
+    // 更新本地数据
+    deployments = sorted;
+
+    // 重新渲染
+    renderDeployments();
+
+    // 批量调用 API 更新 order
+    if (updates.length > 0) {
+      var promises = updates.map(function (u) {
+        return api('/deployments/' + u.id, {
+          method: 'PUT',
+          body: JSON.stringify({ order: u.order }),
+        }).catch(function (err) {
+          showToast('❌ 更新 order 失败 (' + u.id + '): ' + err.message);
+        });
+      });
+      Promise.all(promises).then(function () {
+        showToast('✅ 优先级已更新');
+      });
+    }
   }
 
   // ==========================================================================
@@ -522,9 +692,16 @@
   // ==========================================================================
 
   function loadDeployments() {
-    api('/deployments')
-      .then(function (data) {
-        deployments = data.deployments || [];
+    // 并行加载 deployment 列表和 token 余额
+    Promise.all([
+      api('/deployments'),
+      api('/token/status').catch(function () { return { deployments: {} }; }),
+    ])
+      .then(function (results) {
+        var depData = results[0];
+        var tokenData = results[1];
+        deployments = depData.deployments || [];
+        tokenStatus = tokenData.deployments || {};
         renderDeployments();
         renderProgress();
       })
