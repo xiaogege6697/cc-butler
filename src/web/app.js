@@ -192,7 +192,7 @@
       }
       var used = tokenData.usedQuota != null ? tokenData.usedQuota.toFixed(1) : '--';
       var total = tokenData.totalQuota != null ? tokenData.totalQuota.toFixed(1) : '--';
-      consumedText = currency + used + ' / ' + total + '  <span class="dep-card__consumption-label">' + percent + '%</span>';
+      consumedText = currency + used + ' / ' + total;
       if (percent >= 80) barClass = 'dep-card__bar--red';
       else if (percent >= 50) barClass = 'dep-card__bar--yellow';
       else barClass = 'dep-card__bar--green';
@@ -203,21 +203,26 @@
 
     return (
       '<div class="dep-card' + stagingClass + '" draggable="true" data-id="' + d.id + '" data-order="' + d.order + '" data-enabled="' + d.enabled + '">' +
-        '<span class="dep-card__drag-handle" title="拖拽">⠿</span>' +
-        '<div class="dep-card__left">' +
-          '<span class="dep-card__health-dot ' + dotClass + '"></span>' +
-          '<div class="dep-card__title-area">' +
-            '<div class="dep-card__name">' + escapeHtml(d.name) + '</div>' +
-            '<div class="dep-card__model">' + escapeHtml(d.model || d.baseUrl || '--') + '</div>' +
+        '<span class="dep-card__drag-handle" title="拖拽排序">⠿</span>' +
+        '<div class="dep-card__header">' +
+          '<div class="dep-card__left">' +
+            '<span class="dep-card__health-dot ' + dotClass + '"></span>' +
+            '<div class="dep-card__title-area">' +
+              '<div class="dep-card__name">' + escapeHtml(d.name) + '</div>' +
+              '<div class="dep-card__model">' + escapeHtml(d.model || d.baseUrl || '--') + '</div>' +
+            '</div>' +
           '</div>' +
+          orderHtml +
         '</div>' +
         '<div class="dep-card__consumption">' +
+          '<div class="dep-card__consumption-info">' +
+            '<span class="dep-card__consumption-label">消耗</span>' +
+            '<span class="dep-card__consumption-text">' + consumedText + '</span>' +
+          '</div>' +
           '<div class="dep-card__bar-wrap">' +
             '<div class="dep-card__bar ' + barClass + '" style="width:' + Math.max(2, percent) + '%"></div>' +
           '</div>' +
-          '<span class="dep-card__consumption-text">' + consumedText + '</span>' +
         '</div>' +
-        orderHtml +
       '</div>'
     );
   }
