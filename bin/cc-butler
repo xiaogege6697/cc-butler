@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+'use strict';
+
+const path = require('path');
+
+// 默认工作目录为项目根目录
+process.env.CC_BUTLER_ROOT = process.env.CC_BUTLER_ROOT || path.resolve(__dirname, '..');
+
+require('../src/server.js');

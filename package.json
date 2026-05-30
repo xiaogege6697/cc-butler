@@ -1,0 +1,27 @@
+{
+  "name": "cc-butler",
+  "version": "0.1.0",
+  "description": "🏠 cc-管家：Claude Code 智能管家 - 智能路由 + Token 监控 + Skill 库",
+  "main": "src/server.js",
+  "bin": {
+    "cc-butler": "./bin/cc-butler"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "enable:mac-service": "node scripts/enable-mac-service.mjs",
+    "disable:mac-service": "node scripts/disable-mac-service.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "keywords": ["claude-code", "proxy", "router", "skill", "butler"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xiaogege6697/cc-butler"
+  }
+}

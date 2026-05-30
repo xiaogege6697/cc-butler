@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cc-管家</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- 顶栏 -->
+  <header class="top-bar">
+    <div class="top-bar__brand">
+      <span class="top-bar__emoji">🏠</span>
+      <h1 class="top-bar__title">cc-管家</h1>
+    </div>
+    <div class="top-bar__status">
+      <span class="top-bar__dot" id="connDot"></span>
+      <span class="top-bar__conn-text" id="connText">连接中...</span>
+    </div>
+  </header>
+
+  <main class="dashboard">
+    <!-- Token 余额区 -->
+    <section class="section">
+      <div class="section__header">
+        <h2 class="section__title"><span class="emoji">📊</span> Token 余额</h2>
+        <span class="section__meta" id="tokenUpdateTime">--</span>
+      </div>
+      <div class="progress-grid" id="progressGrid">
+        <!-- JS 动态渲染 -->
+      </div>
+    </section>
+
+    <!-- 路由状态区 -->
+    <section class="section">
+      <div class="section__header">
+        <h2 class="section__title"><span class="emoji">🔀</span> 路由状态</h2>
+      </div>
+      <div class="card card--deployment-list" id="deploymentList">
+        <!-- JS 动态渲染 -->
+      </div>
+    </section>
+
+    <!-- Skill 库区 -->
+    <section class="section">
+      <div class="section__header">
+        <h2 class="section__title"><span class="emoji">🔮</span> Skill 库</h2>
+        <div class="section__controls">
+          <span class="section__label">🔄 自动搜集</span>
+          <label class="toggle">
+            <input type="checkbox" id="autoHuntToggle">
+            <span class="toggle__track"><span class="toggle__thumb"></span></span>
+          </label>
+        </div>
+      </div>
+      <div class="skill-list" id="skillList">
+        <!-- JS 动态渲染 -->
+      </div>
+    </section>
+
+    <!-- 实时请求区 -->
+    <section class="section">
+      <div class="section__header">
+        <h2 class="section__title"><span class="emoji">📡</span> 实时请求</h2>
+        <span class="section__meta" id="requestCount">0 条</span>
+      </div>
+      <div class="request-list" id="requestList">
+        <!-- JS 动态渲染 -->
+      </div>
+    </section>
+  </main>
+
+  <!-- Toast 容器 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
