@@ -14,6 +14,12 @@
       <h1 class="top-bar__title">cc-管家</h1>
     </div>
     <div class="top-bar__status">
+      <div class="theme-switcher" id="themeSwitcher">
+        <button class="theme-btn" data-theme="bright" title="明亮">☀️</button>
+        <button class="theme-btn" data-theme="dark" title="暗色">🌙</button>
+        <button class="theme-btn" data-theme="comic" title="漫画">🎨</button>
+        <button class="theme-btn" data-theme="puppy" title="线条小狗">🐾</button>
+      </div>
       <span class="top-bar__dot" id="connDot"></span>
       <span class="top-bar__conn-text" id="connText">连接中...</span>
     </div>
@@ -34,10 +40,41 @@
     <!-- 路由状态区 -->
     <section class="section">
       <div class="section__header">
-        <h2 class="section__title"><span class="emoji">🔀</span> 路由状态</h2>
+        <h2 class="section__title"><span class="emoji">🔀</span> 路由优先级</h2>
+        <span class="section__meta" id="depSummary">--</span>
       </div>
       <div class="card card--deployment-list" id="deploymentList">
-        <!-- JS 动态渲染 -->
+        <!-- 活跃路由区 -->
+        <div class="dep-zone dep-zone--active">
+          <div class="dep-zone__label">🟢 活跃路由 · 拖拽排序调整优先级</div>
+          <div class="dep-zone__cards" id="activeZone">
+            <!-- JS 动态渲染 -->
+          </div>
+        </div>
+        <!-- 灰度暂存区 -->
+        <div class="dep-zone dep-zone--staging" id="stagingZone">
+          <div class="dep-zone__label">⏸ 暂存区</div>
+          <div class="dep-zone__cards" id="stagingZoneCards">
+            <!-- JS 动态渲染 -->
+          </div>
+          <div class="dep-zone__empty">拖入此区暂时移除路由</div>
+        </div>
+        <!-- 新增路由 -->
+        <div class="add-deploy" id="addDeploy">
+          <button class="add-deploy__btn" id="addDeployBtn">+ 新增路由</button>
+          <form class="add-deploy__form" id="addDeployForm">
+            <div class="add-deploy__fields">
+              <input class="add-deploy__input" name="name" placeholder="名称 (如 DeepSeek)" required>
+              <input class="add-deploy__input" name="baseUrl" placeholder="地址 (https://api.example.com)">
+              <input class="add-deploy__input" name="apiKey" placeholder="API Key (sk-...)" required>
+              <input class="add-deploy__input" name="model" placeholder="模型 (deepseek-chat)">
+            </div>
+            <div class="add-deploy__actions">
+              <button type="button" class="btn btn--skip" id="addDeployCancel">取消</button>
+              <button type="submit" class="btn btn--install">✓ 添加</button>
+            </div>
+          </form>
+        </div>
       </div>
     </section>
 
@@ -78,6 +115,25 @@
 
   <!-- Toast 容器 -->
   <div class="toast-container" id="toastContainer"></div>
+
+  <!-- 请求详情 Modal -->
+  <div class="modal-overlay" id="requestModal">
+    <div class="modal">
+      <div class="modal__header">
+        <h2 class="modal__title" id="modalTitle">📡 请求详情</h2>
+        <button class="modal__close" id="modalClose">✕</button>
+      </div>
+      <div class="modal__tabs" id="modalTabs">
+        <button class="modal__tab is-active" data-tab="overview">概览</button>
+        <button class="modal__tab" data-tab="request">请求体</button>
+        <button class="modal__tab" data-tab="response">响应体</button>
+        <button class="modal__tab" data-tab="headers">Headers</button>
+      </div>
+      <div class="modal__body" id="modalBody">
+        <!-- JS 动态渲染 -->
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

@@ -17,6 +17,10 @@
     tokenUpdateTime: $('#tokenUpdateTime'),
     progressGrid: $('#progressGrid'),
     deploymentList: $('#deploymentList'),
+    depSummary: $('#depSummary'),
+    activeZone: $('#activeZone'),
+    stagingZone: $('#stagingZone'),
+    stagingZoneCards: $('#stagingZoneCards'),
     autoHuntToggle: $('#autoHuntToggle'),
     skillHuntBtn: $('#skillHuntBtn'),
     skillStats: $('#skillStats'),
@@ -26,6 +30,18 @@
     requestCount: $('#requestCount'),
     requestList: $('#requestList'),
     toastContainer: $('#toastContainer'),
+    // 主题
+    themeSwitcher: $('#themeSwitcher'),
+    // 新增路由
+    addDeployBtn: $('#addDeployBtn'),
+    addDeployForm: $('#addDeployForm'),
+    addDeployCancel: $('#addDeployCancel'),
+    // Modal
+    requestModal: $('#requestModal'),
+    modalTitle: $('#modalTitle'),
+    modalClose: $('#modalClose'),
+    modalTabs: $('#modalTabs'),
+    modalBody: $('#modalBody'),
   };
 
   // ==========================================================================
@@ -49,6 +65,12 @@
 
   // rAF 合并渲染标记
   var renderScheduled = false;
+
+  // Modal 状态
+  var modalState = {
+    record: null,
+    activeTab: 'overview',
+  };
 
   // ==========================================================================
   // 工具函数
@@ -137,46 +159,66 @@
   }
 
   // ==========================================================================
-  // 渲染：Token 进度条
+  // 渲染：Token 消耗
   // ==========================================================================
 
   function renderProgress() {
-    // 目前没有独立的 token 余额 API，从 deployment health 状态推断
-    // 用 deployment 的健康状态来展示
     if (deployments.length === 0) {
       dom.progressGrid.innerHTML = '<div class="empty-state"><span class="empty-state__emoji">📭</span>暂无 deployment</div>';
       return;
     }
 
     dom.progressGrid.innerHTML = deployments.map(function (d) {
-      var emoji = d.enabled ? '🟢' : '🔴';
-      var barClass = 'progress-card__bar--green';
-      // 用 order 作为伪进度值展示（实际项目中替换为真实 token 数据）
-      var percent = Math.max(0, Math.min(100, 100 - (d.order - 1) * 20));
-      if (percent < 40) barClass = 'progress-card__bar--red';
-      else if (percent < 70) barClass = 'progress-card__bar--yellow';
+      var tokenData = tokenStatus[d.id];
 
-      var statusText = '';
-      if (!d.enabled) {
-        statusText = '已禁用';
-        barClass = 'progress-card__bar--red';
-      } else if (d.health && !d.health.isHealthy) {
-        statusText = '冷却中 ❄️';
-        barClass = 'progress-card__bar--yellow';
-      } else {
-        statusText = '正常 😊';
+      // 消耗百分比（percentage 是已用占比）
+      var percent = 0;
+      var barClass = 'progress-card__bar--gray';
+      var consumedText = '暂无数据';
+
+      if (tokenData && tokenData.percentage != null) {
+        percent = Math.round(tokenData.percentage);
+        consumedText = (tokenData.usedQuota != null ? tokenData.usedQuota.toFixed(1) : '--') +
+          ' / ' + (tokenData.totalQuota != null ? tokenData.totalQuota.toFixed(1) : '--');
+        if (percent < 50) barClass = 'progress-card__bar--green';
+        else if (percent < 80) barClass = 'progress-card__bar--yellow';
+        else barClass = 'progress-card__bar--red';
       }
+
+      // 货币符号
+      var currency = '';
+      if (tokenData && tokenData.currency) {
+        if (tokenData.currency === 'CNY' || tokenData.currency === 'cny') currency = '¥';
+        else if (tokenData.currency === 'USD' || tokenData.currency === 'usd') currency = '$';
+      }
+
+      // 健康状态
+      var dotColor = 'var(--accent-green)';
+      if (!d.enabled) dotColor = 'var(--text-dim)';
+      else if (d.health && !d.health.isHealthy) dotColor = 'var(--accent-red)';
+
+      // 消耗百分比颜色
+      var pctColor = barClass.includes('green') ? 'var(--accent-green)'
+        : barClass.includes('yellow') ? 'var(--accent-yellow)' : 'var(--accent-red)';
+      if (barClass.includes('gray')) pctColor = 'var(--text-dim)';
 
       return (
         '<div class="card progress-card">' +
           '<div class="progress-card__header">' +
-            '<span class="progress-card__name">' + emoji + ' ' + escapeHtml(d.name) + '</span>' +
-            '<span class="progress-card__percent" style="color:var(--accent-' + (barClass.includes('green') ? 'green' : barClass.includes('yellow') ? 'yellow' : 'red') + ')">' +
-              statusText +
+            '<span class="progress-card__name" style="gap:8px">' +
+              '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + dotColor + '"></span>' +
+              escapeHtml(d.name) +
+            '</span>' +
+            '<span class="progress-card__percent" style="color:' + pctColor + '">' +
+              percent + '%' +
             '</span>' +
           '</div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);margin-bottom:2px">' +
+            '<span>消耗</span>' +
+            '<span>' + currency + consumedText + '</span>' +
+          '</div>' +
           '<div class="progress-card__bar-wrap">' +
-            '<div class="progress-card__bar ' + barClass + '" style="width:' + percent + '%"></div>' +
+            '<div class="progress-card__bar ' + barClass + '" style="width:' + Math.max(2, percent) + '%"></div>' +
           '</div>' +
         '</div>'
       );
@@ -186,145 +228,82 @@
   }
 
   // ==========================================================================
-  // 渲染：Deployment 可拖动卡片
+  // 渲染：Deployment 双区卡片
   // ==========================================================================
 
-  function renderDeployments() {
-    if (deployments.length === 0) {
-      dom.deploymentList.innerHTML = '<div class="empty-state"><span class="empty-state__emoji">📭</span>暂无 deployment</div>';
-      return;
+  // 生成单个紧凑卡片 HTML
+  function buildDepCard(d, isStaging) {
+    // 健康状态点
+    var dotClass = 'dep-card__health-dot--healthy';
+    if (!d.enabled) dotClass = 'dep-card__health-dot--disabled';
+    else if (d.health && !d.health.isHealthy) dotClass = 'dep-card__health-dot--unhealthy';
+
+    // 消耗进度条
+    var tokenData = tokenStatus[d.id];
+    var percent = 0;
+    var barClass = 'dep-card__bar--gray';
+    var pctText = '--';
+
+    if (tokenData && tokenData.percentage != null) {
+      percent = Math.round(tokenData.percentage);
+      pctText = percent + '%';
+      if (percent >= 80) barClass = 'dep-card__bar--red';
+      else if (percent >= 50) barClass = 'dep-card__bar--yellow';
+      else barClass = 'dep-card__bar--green';
     }
 
-    // 按 order 排序
-    var sorted = deployments.slice().sort(function (a, b) { return a.order - b.order; });
+    var stagingClass = isStaging ? ' dep-card--staging' : '';
+    var orderHtml = isStaging ? '' : '<span class="dep-card__order">P' + d.order + '</span>';
 
-    dom.deploymentList.innerHTML = sorted.map(function (d, index) {
-      // 健康指示器 emoji
-      var healthEmoji = '';
-      if (!d.enabled) healthEmoji = '💤';
-      else if (d.health && !d.health.isHealthy) healthEmoji = '❄️';
-      else if (d.health && d.health.consecutiveFailures > 0) healthEmoji = '⚠️';
-      else healthEmoji = '🟢';
-
-      // token 余额进度条
-      var tokenData = tokenStatus[d.id];
-      var percent = 0;
-      var barClass = 'dep-card__bar--gray';
-      var balanceText = '无余额数据';
-      var hasData = false;
-
-      if (tokenData && tokenData.percentage != null) {
-        percent = Math.round(tokenData.percentage);
-        hasData = true;
-        balanceText = (tokenData.usedQuota != null && tokenData.totalQuota != null)
-          ? tokenData.usedQuota.toFixed(1) + ' / ' + tokenData.totalQuota.toFixed(1)
-          : percent + '%';
-      } else if (tokenData && tokenData.balance != null) {
-        hasData = true;
-        percent = Math.min(100, Math.max(0, Math.round(tokenData.balance)));
-        balanceText = '余额 ' + tokenData.balance.toFixed(1);
-      }
-
-      // 色彩逻辑：percent 是已用百分比，越高越危险
-      if (hasData) {
-        if (percent >= 80) barClass = 'dep-card__bar--red';
-        else if (percent >= 50) barClass = 'dep-card__bar--yellow';
-        else barClass = 'dep-card__bar--green';
-      }
-
-      if (!d.enabled) {
-        barClass = 'dep-card__bar--red';
-      }
-
-      // 颜色值用于百分比文字
-      var percentColor = barClass.includes('green') ? 'var(--accent-green)'
-        : barClass.includes('yellow') ? 'var(--accent-yellow)'
-        : barClass.includes('gray') ? 'var(--text-dim)' : 'var(--accent-red)';
-
-      // 货币符号
-      var currencyHtml = '';
-      if (tokenData && tokenData.currency) {
-        var symbol = tokenData.currency;
-        if (tokenData.currency === 'CNY' || tokenData.currency === 'cny') symbol = '¥';
-        else if (tokenData.currency === 'USD' || tokenData.currency === 'usd') symbol = '$';
-        currencyHtml = '<span class="dep-card__currency">' + symbol + '</span>';
-      }
-
-      // 套餐标签
-      var planHtml = '';
-      if (tokenData && tokenData.plan) {
-        planHtml = '<span class="dep-card__plan-tag">' + escapeHtml(tokenData.plan) + '</span>';
-      }
-
-      // 刷新倒计时
-      var resetHtml = '';
-      if (tokenData && tokenData.resetAt) {
-        var resetTime = new Date(tokenData.resetAt);
-        var now = new Date();
-        if (resetTime > now) {
-          var diffMs = resetTime - now;
-          var diffH = Math.floor(diffMs / 3600000);
-          var diffM = Math.floor((diffMs % 3600000) / 60000);
-          var countdown = diffH > 0 ? diffH + 'h' + diffM + 'm' : diffM + 'm';
-          resetHtml = '<span class="dep-card__reset-countdown">刷新于 ' + countdown + '</span>';
-        }
-      }
-
-      return (
-        '<div class="dep-card" draggable="true" data-id="' + d.id + '" data-order="' + d.order + '">' +
-          '<span class="dep-card__drag-handle" title="拖动排序">⠿</span>' +
-          '<div class="dep-card__top">' +
-            '<div class="dep-card__title-area">' +
-              '<div class="dep-card__name">' + escapeHtml(d.name) + '</div>' +
-              '<div class="dep-card__model">' + escapeHtml(d.model || d.baseUrl || '--') + '</div>' +
-            '</div>' +
-            '<span class="dep-card__health" title="' + healthEmoji + '">' + healthEmoji + '</span>' +
+    return (
+      '<div class="dep-card' + stagingClass + '" draggable="true" data-id="' + d.id + '" data-order="' + d.order + '" data-enabled="' + d.enabled + '">' +
+        '<span class="dep-card__drag-handle" title="拖拽">⠿</span>' +
+        '<span class="dep-card__health-dot ' + dotClass + '"></span>' +
+        '<div class="dep-card__title-area">' +
+          '<div class="dep-card__name">' + escapeHtml(d.name) + '</div>' +
+          '<div class="dep-card__model">' + escapeHtml(d.model || d.baseUrl || '--') + '</div>' +
+        '</div>' +
+        '<div class="dep-card__progress">' +
+          '<div class="dep-card__bar-wrap">' +
+            '<div class="dep-card__bar ' + barClass + '" style="width:' + Math.max(2, percent) + '%"></div>' +
           '</div>' +
-          '<div class="dep-card__progress">' +
-            '<div class="dep-card__progress-header">' +
-              '<span class="dep-card__progress-label">余额' + planHtml + '</span>' +
-              '<span class="dep-card__progress-value" style="color:' + percentColor + '">' +
-                currencyHtml + balanceText + resetHtml +
-              '</span>' +
-            '</div>' +
-            '<div class="dep-card__bar-wrap">' +
-              '<div class="dep-card__bar ' + barClass + '" style="width:' + percent + '%"></div>' +
-            '</div>' +
-          '</div>' +
-          '<div class="dep-card__bottom">' +
-            '<span class="dep-card__order-tag">P' + d.order + '</span>' +
-            '<label class="toggle" onclick="event.stopPropagation()">' +
-              '<input type="checkbox" class="js-deployment-toggle" data-id="' + d.id + '"' +
-                (d.enabled ? ' checked' : '') + '>' +
-              '<span class="toggle__track"><span class="toggle__thumb"></span></span>' +
-            '</label>' +
-          '</div>' +
-        '</div>'
-      );
-    }).join('');
+          '<span class="dep-card__progress-text">' + pctText + '</span>' +
+        '</div>' +
+        orderHtml +
+      '</div>'
+    );
+  }
 
-    // 绑定 toggle 事件
-    dom.deploymentList.querySelectorAll('.js-deployment-toggle').forEach(function (el) {
-      el.addEventListener('change', function () {
-        var id = this.dataset.id;
-        api('/deployments/' + id + '/toggle', { method: 'PATCH' })
-          .then(function () {
-            showToast('✅ 已切换 ' + id);
-          })
-          .catch(function (err) {
-            showToast('❌ 切换失败: ' + err.message);
-            // 恢复 checkbox 状态
-            this.checked = !this.checked;
-          }.bind(this));
-      });
-    });
+  function renderDeployments() {
+    var enabled = deployments.filter(function (d) { return d.enabled; })
+      .sort(function (a, b) { return a.order - b.order; });
+    var disabled = deployments.filter(function (d) { return !d.enabled; });
 
-    // 绑定拖动事件
+    // 摘要
+    dom.depSummary.textContent = enabled.length + ' 活跃 · ' + disabled.length + ' 暂存';
+
+    // 活跃区
+    if (enabled.length === 0) {
+      dom.activeZone.innerHTML = '<div class="empty-state" style="padding:16px"><span class="empty-state__emoji">📭</span>暂无活跃路由</div>';
+    } else {
+      dom.activeZone.innerHTML = enabled.map(function (d) { return buildDepCard(d, false); }).join('');
+    }
+
+    // 灰度区
+    dom.stagingZoneCards.innerHTML = disabled.map(function (d) { return buildDepCard(d, true); }).join('');
+
+    // 灰度区空状态
+    var emptyEl = dom.stagingZone.querySelector('.dep-zone__empty');
+    if (emptyEl) {
+      emptyEl.style.display = disabled.length === 0 ? 'block' : 'none';
+    }
+
+    // 绑定拖拽
     bindDragEvents();
   }
 
   // ==========================================================================
-  // 拖动排序逻辑
+  // 拖拽排序 + 跨区拖拽
   // ==========================================================================
 
   function bindDragEvents() {
@@ -332,9 +311,47 @@
     cards.forEach(function (card) {
       card.addEventListener('dragstart', onDragStart);
       card.addEventListener('dragend', onDragEnd);
-      card.addEventListener('dragover', onDragOver);
-      card.addEventListener('dragleave', onDragLeave);
-      card.addEventListener('drop', onDrop);
+      card.addEventListener('dragover', onCardDragOver);
+      card.addEventListener('dragleave', onCardDragLeave);
+      card.addEventListener('drop', onCardDrop);
+    });
+
+    // 灰度区作为整体 drop target
+    dom.stagingZone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      dom.stagingZone.classList.add('is-drop-target');
+    });
+    dom.stagingZone.addEventListener('dragleave', function (e) {
+      if (!dom.stagingZone.contains(e.relatedTarget)) {
+        dom.stagingZone.classList.remove('is-drop-target');
+      }
+    });
+    dom.stagingZone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      dom.stagingZone.classList.remove('is-drop-target');
+      if (!dragState) return;
+      // 拖到灰度区 → 禁用
+      var dep = deployments.find(function (d) { return d.id === dragState.id; });
+      if (dep && dep.enabled) {
+        toggleDeployment(dep.id, false);
+      }
+      dragState = null;
+    });
+
+    // 活跃区作为整体 drop target（从灰度区拖回来）
+    dom.activeZone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
+    dom.activeZone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      if (!dragState) return;
+      var dep = deployments.find(function (d) { return d.id === dragState.id; });
+      if (dep && !dep.enabled) {
+        toggleDeployment(dep.id, true);
+      }
+      dragState = null;
     });
   }
 
@@ -344,74 +361,93 @@
     card.classList.add('is-dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', card.dataset.id);
-
-    // 延迟设置拖动样式，避免截图问题
     requestAnimationFrame(function () {
       card.classList.add('is-dragging');
     });
   }
 
   function onDragEnd(e) {
-    var card = e.currentTarget;
-    card.classList.remove('is-dragging');
-    // 清除所有占位符
+    e.currentTarget.classList.remove('is-dragging');
     dom.deploymentList.querySelectorAll('.is-placeholder').forEach(function (el) {
       el.classList.remove('is-placeholder');
     });
+    dom.stagingZone.classList.remove('is-drop-target');
     dragState = null;
   }
 
-  function onDragOver(e) {
+  function onCardDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-
     var target = e.currentTarget;
-    // 跳过自身
     if (dragState && target.dataset.id === dragState.id) return;
-
-    // 清除其他占位符
     dom.deploymentList.querySelectorAll('.is-placeholder').forEach(function (el) {
       if (el !== target) el.classList.remove('is-placeholder');
     });
-
     target.classList.add('is-placeholder');
   }
 
-  function onDragLeave(e) {
+  function onCardDragLeave(e) {
     var target = e.currentTarget;
-    // 只在真正离开时移除（排除子元素触发）
     if (!target.contains(e.relatedTarget)) {
       target.classList.remove('is-placeholder');
     }
   }
 
-  function onDrop(e) {
+  function onCardDrop(e) {
     e.preventDefault();
     var target = e.currentTarget;
     target.classList.remove('is-placeholder');
-
     if (!dragState || target.dataset.id === dragState.id) return;
 
     var draggedId = dragState.id;
     var targetId = target.dataset.id;
 
-    // 根据 DOM 顺序重新计算 order
-    reorderDeployments(draggedId, targetId);
+    // 同区排序（两个都是 enabled 或都是 disabled）
+    var dragged = deployments.find(function (d) { return d.id === draggedId; });
+    var target2 = deployments.find(function (d) { return d.id === targetId; });
+    if (dragged && target2 && dragged.enabled === target2.enabled) {
+      if (dragged.enabled) {
+        reorderActiveDeployments(draggedId, targetId);
+      }
+      // disabled 区不排序，忽略
+    } else if (dragged && target2 && dragged.enabled !== target2.enabled) {
+      // 跨区拖拽 → 切换状态
+      toggleDeployment(draggedId, !dragged.enabled);
+    }
+
+    dragState = null;
   }
 
-  function reorderDeployments(draggedId, targetId) {
-    // 复制并按当前 order 排序
-    var sorted = deployments.slice().sort(function (a, b) { return a.order - b.order; });
-    var draggedIndex = sorted.findIndex(function (d) { return d.id === draggedId; });
-    var targetIndex = sorted.findIndex(function (d) { return d.id === targetId; });
+  function toggleDeployment(id, enable) {
+    api('/deployments/' + id + '/toggle', { method: 'PATCH' })
+      .then(function () {
+        var dep = deployments.find(function (d) { return d.id === id; });
+        if (dep) dep.enabled = enable;
+        if (enable) {
+          // 启用时分配到末尾 order
+          var maxOrder = 0;
+          deployments.forEach(function (d) { if (d.enabled && d.order > maxOrder) maxOrder = d.order; });
+          if (dep) dep.order = maxOrder + 1;
+        }
+        renderDeployments();
+        renderProgress();
+        showToast(enable ? '✅ 已启用路由' : '⏸ 已暂存路由');
+      })
+      .catch(function (err) {
+        showToast('❌ 切换失败: ' + err.message);
+      });
+  }
 
-    if (draggedIndex === -1 || targetIndex === -1) return;
+  function reorderActiveDeployments(draggedId, targetId) {
+    var sorted = deployments.filter(function (d) { return d.enabled; })
+      .sort(function (a, b) { return a.order - b.order; });
+    var draggedIdx = sorted.findIndex(function (d) { return d.id === draggedId; });
+    var targetIdx = sorted.findIndex(function (d) { return d.id === targetId; });
+    if (draggedIdx === -1 || targetIdx === -1) return;
 
-    // 从数组中移除被拖动的元素，插入到目标位置
-    var dragged = sorted.splice(draggedIndex, 1)[0];
-    sorted.splice(targetIndex, 0, dragged);
+    var dragged = sorted.splice(draggedIdx, 1)[0];
+    sorted.splice(targetIdx, 0, dragged);
 
-    // 重新分配 order（从 1 开始）
     var updates = [];
     sorted.forEach(function (d, i) {
       var newOrder = i + 1;
@@ -421,14 +457,16 @@
       }
     });
 
-    // 更新本地数据
-    deployments = sorted;
+    // 同步到主数组
+    sorted.forEach(function (d) {
+      var main = deployments.find(function (x) { return x.id === d.id; });
+      if (main) main.order = d.order;
+    });
 
-    // 重新渲染
     renderDeployments();
 
-    // 落地回弹动画 — 找到被拖动的卡片
-    var settledCard = dom.deploymentList.querySelector('.dep-card[data-id="' + draggedId + '"]');
+    // 回弹动画
+    var settledCard = dom.activeZone.querySelector('.dep-card[data-id="' + draggedId + '"]');
     if (settledCard) {
       settledCard.classList.add('is-settling');
       settledCard.addEventListener('animationend', function handler() {
@@ -437,14 +475,14 @@
       });
     }
 
-    // 批量调用 API 更新 order
+    // 批量持久化
     if (updates.length > 0) {
       var promises = updates.map(function (u) {
         return api('/deployments/' + u.id, {
           method: 'PUT',
           body: JSON.stringify({ order: u.order }),
         }).catch(function (err) {
-          showToast('❌ 更新 order 失败 (' + u.id + '): ' + err.message);
+          showToast('❌ 更新 order 失败: ' + err.message);
         });
       });
       Promise.all(promises).then(function () {
@@ -856,8 +894,6 @@
     var currentIds = new Set(requests.map(function (r) { return r.id; }));
     requestElCache.forEach(function (el, id) {
       if (!currentIds.has(id)) {
-        var detail = document.getElementById('detail-' + id);
-        if (detail) detail.remove();
         el.remove();
         requestElCache.delete(id);
       }
@@ -891,14 +927,8 @@
         }
         if (durationEl) durationEl.textContent = dur;
         if (deploymentEl) deploymentEl.textContent = depName;
-
-        // 更新详情内容
-        var detailEl = document.getElementById('detail-' + r.id);
-        if (detailEl) {
-          detailEl.innerHTML = renderRequestDetail(r);
-        }
       } else {
-        // 新增记录：用 DocumentFragment 构建
+        // 新增记录
         var itemEl = document.createElement('div');
         itemEl.className = 'request-item';
         itemEl.dataset.id = r.id;
@@ -909,14 +939,9 @@
           '<span class="request-item__duration">' + dur + '</span>' +
           '<span class="request-item__deployment">' + escapeHtml(depName) + '</span>';
 
-        var detailEl = document.createElement('div');
-        detailEl.className = 'request-detail';
-        detailEl.id = 'detail-' + r.id;
-        detailEl.innerHTML = renderRequestDetail(r);
-
-        // 绑定展开/收起
+        // 点击打开 Modal
         itemEl.addEventListener('click', function () {
-          detailEl.classList.toggle('is-visible');
+          openRequestModal(r.id);
         });
 
         requestElCache.set(r.id, itemEl);
@@ -924,59 +949,375 @@
         // 新增记录 prepend 到列表头部
         if (dom.requestList.firstChild) {
           dom.requestList.insertBefore(itemEl, dom.requestList.firstChild);
-          dom.requestList.insertBefore(detailEl, itemEl.nextSibling);
         } else {
           dom.requestList.appendChild(itemEl);
-          dom.requestList.appendChild(detailEl);
         }
       }
     });
   }
 
-  function renderRequestDetail(r) {
-    var lines = [];
+  // ==========================================================================
+  // 请求详情 Modal
+  // ==========================================================================
 
-    lines.push(row('Deployment', escapeHtml(r.deploymentName || '--')));
-    lines.push(row('开始时间', r.startedAt ? new Date(r.startedAt).toLocaleString() : '--'));
-    if (r.endedAt) {
-      lines.push(row('耗时', formatDuration(r.endedAt - r.startedAt)));
+  function openRequestModal(id) {
+    // 从本地缓存找记录
+    var record = requests.find(function (r) { return r.id === id; });
+    if (!record) {
+      showToast('❌ 找不到请求 #' + id);
+      return;
     }
-    if (r.modelRequested) {
-      lines.push(row('请求模型', escapeHtml(r.modelRequested)));
+
+    // 如果记录还没结束，从 API 获取完整数据
+    if (!record.endedAt) {
+      api('/requests/' + id)
+        .then(function (full) {
+          modalState.record = full;
+          modalState.activeTab = 'overview';
+          renderModal();
+        })
+        .catch(function () {
+          modalState.record = record;
+          modalState.activeTab = 'overview';
+          renderModal();
+        });
+    } else {
+      modalState.record = record;
+      modalState.activeTab = 'overview';
+      renderModal();
     }
-    if (r.modelOverride) {
-      lines.push(row('模型覆盖', escapeHtml(r.modelOverride)));
-    }
-    if (r.modelServed) {
-      lines.push(row('实际模型', escapeHtml(r.modelServed)));
-    }
-    if (r.isStream != null) {
-      lines.push(row('流式', r.isStream ? '是' : '否'));
-    }
+  }
+
+  function renderModal() {
+    var r = modalState.record;
+    if (!r) return;
+
+    // 标题
+    dom.modalTitle.innerHTML = '📡 请求 #' + r.id;
+
+    // 渲染 Tab 面板
+    dom.modalBody.innerHTML =
+      '<div class="modal-tab-panel' + (modalState.activeTab === 'overview' ? ' is-visible' : '') + '" data-panel="overview">' +
+        renderOverview(r) +
+      '</div>' +
+      '<div class="modal-tab-panel' + (modalState.activeTab === 'request' ? ' is-visible' : '') + '" data-panel="request">' +
+        renderJsonPanel(r.reqBody, '请求体') +
+      '</div>' +
+      '<div class="modal-tab-panel' + (modalState.activeTab === 'response' ? ' is-visible' : '') + '" data-panel="response">' +
+        renderJsonPanel(r.resBody, '响应体') +
+      '</div>' +
+      '<div class="modal-tab-panel' + (modalState.activeTab === 'headers' ? ' is-visible' : '') + '" data-panel="headers">' +
+        renderHeadersPanel(r) +
+      '</div>';
+
+    // 高亮当前 Tab
+    dom.modalTabs.querySelectorAll('.modal__tab').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.dataset.tab === modalState.activeTab);
+    });
+
+    // 显示 Modal
+    dom.requestModal.classList.add('is-visible');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    dom.requestModal.classList.remove('is-visible');
+    document.body.style.overflow = '';
+    modalState.record = null;
+  }
+
+  function switchTab(tabName) {
+    modalState.activeTab = tabName;
+    dom.modalBody.querySelectorAll('.modal-tab-panel').forEach(function (panel) {
+      panel.classList.toggle('is-visible', panel.dataset.panel === tabName);
+    });
+    dom.modalTabs.querySelectorAll('.modal__tab').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.dataset.tab === tabName);
+    });
+  }
+
+  // 概览 Tab
+  function renderOverview(r) {
+    var dur = r.endedAt ? formatDuration(r.endedAt - r.startedAt) : '进行中...';
+    var sc = statusClass(r.status);
+    var statusLabel = r.status ? (r.status + ' ' + statusEmoji(r.status)) : '⏳';
+
+    // 指标卡片
+    var cards =
+      '<div class="overview-grid">' +
+        overviewCard('🎯 路由', escapeHtml(r.deploymentName || '--'), '', '') +
+        overviewCard('⏱ 耗时', dur, '', '') +
+        overviewCard('📊 状态', statusLabel, 'overview-card__value--' + (sc || 'warn'), '') +
+        overviewCard('🕐 时间', r.startedAt ? new Date(r.startedAt).toLocaleTimeString() : '--',
+          '', r.startedAt ? new Date(r.startedAt).toLocaleDateString() : '') +
+      '</div>';
+
+    // 标签
+    var tags = '<div class="overview-tags">';
+    tags += '<span class="overview-tag overview-tag--' + (r.isStream ? 'stream' : 'non-stream') + '">' +
+      (r.isStream ? '⚡ 流式' : '📦 非流式') + '</span>';
     if (r.error) {
-      lines.push(row('错误', '<span style="color:var(--accent-red)">' + escapeHtml(r.error) + '</span>'));
+      tags += '<span class="overview-tag overview-tag--error">❌ 错误</span>';
+    }
+    tags += '</div>';
+
+    // 模型流向
+    var modelHtml = '';
+    if (r.modelRequested || r.modelServed || r.modelOverride) {
+      modelHtml = '<div class="model-flow">' +
+        '<span class="model-flow__label">模型</span>' +
+        '<span class="model-flow__name">' + escapeHtml(r.modelRequested || '未指定') + '</span>';
+      if (r.modelOverride) {
+        modelHtml += '<span class="model-flow__arrow">→</span>' +
+          '<span class="model-flow__override">覆盖: ' + escapeHtml(r.modelOverride) + '</span>';
+      }
+      if (r.modelServed && r.modelServed !== r.modelRequested) {
+        modelHtml += '<span class="model-flow__arrow">→</span>' +
+          '<span class="model-flow__name">' + escapeHtml(r.modelServed) + '</span>';
+      }
+      modelHtml += '</div>';
     }
 
-    // Token 统计
-    var tokens = [];
-    if (r.inputTokens != null) tokens.push(tokenStat('📥 Input', r.inputTokens));
-    if (r.outputTokens != null) tokens.push(tokenStat('📤 Output', r.outputTokens));
-    if (r.cacheReadTokens != null) tokens.push(tokenStat('⚡ Cache Read', r.cacheReadTokens));
-    if (r.cacheCreationTokens != null) tokens.push(tokenStat('💾 Cache Write', r.cacheCreationTokens));
+    // Token 条形图
+    var tokenHtml = renderTokenBars(r);
 
-    var tokensHtml = tokens.length > 0
-      ? '<div class="request-detail__tokens">' + tokens.join('') + '</div>'
-      : '';
+    // 错误信息
+    var errorHtml = '';
+    if (r.error) {
+      errorHtml = '<div class="truncate-notice" style="border-color:rgba(255,71,87,0.3);background:rgba(255,71,87,0.06);color:var(--accent-red);text-align:left">' +
+        '💬 ' + escapeHtml(r.error) + '</div>';
+    }
 
-    return lines.join('') + tokensHtml;
+    return cards + tags + modelHtml + tokenHtml + errorHtml;
   }
 
-  function row(label, value) {
-    return '<div class="request-detail__row"><span class="request-detail__label">' + label + '</span><span class="request-detail__value">' + value + '</span></div>';
+  function overviewCard(label, value, valueClass, sub) {
+    return '<div class="overview-card">' +
+      '<span class="overview-card__label">' + label + '</span>' +
+      '<span class="overview-card__value ' + valueClass + '">' + value + '</span>' +
+      (sub ? '<span class="overview-card__sub">' + sub + '</span>' : '') +
+    '</div>';
   }
 
-  function tokenStat(label, value) {
-    return '<span class="token-stat"><span class="token-stat__label">' + label + '</span><span class="token-stat__value">' + formatNumber(value) + '</span></span>';
+  function renderTokenBars(r) {
+    var items = [];
+    if (r.inputTokens != null) items.push({ label: '📥 Input', value: r.inputTokens, cls: 'input' });
+    if (r.outputTokens != null) items.push({ label: '📤 Output', value: r.outputTokens, cls: 'output' });
+    if (r.cacheReadTokens != null) items.push({ label: '⚡ Cache Read', value: r.cacheReadTokens, cls: 'cache-read' });
+    if (r.cacheCreationTokens != null) items.push({ label: '💾 Cache Write', value: r.cacheCreationTokens, cls: 'cache-write' });
+
+    if (items.length === 0) return '';
+
+    var maxVal = Math.max.apply(null, items.map(function (it) { return it.value; })) || 1;
+
+    var bars = items.map(function (it) {
+      var pct = Math.max(2, Math.round((it.value / maxVal) * 100));
+      return '<div class="token-bar-row">' +
+        '<span class="token-bar-row__label">' + it.label + '</span>' +
+        '<div class="token-bar-row__bar-wrap">' +
+          '<div class="token-bar-row__bar token-bar-row__bar--' + it.cls + '" style="width:' + pct + '%"></div>' +
+        '</div>' +
+        '<span class="token-bar-row__value">' + formatNumber(it.value) + '</span>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="token-bars">' +
+      '<div class="token-bars__title">Token 用量</div>' +
+      bars +
+    '</div>';
+  }
+
+  // 请求体 / 响应体 Tab
+  function renderJsonPanel(data, label) {
+    if (data == null) {
+      return '<div class="json-viewer__empty">📭 无' + label + '数据</div>';
+    }
+
+    var formatted;
+    try {
+      // 处理 express.raw() 存储的 Buffer 对象 { type: "Buffer", data: [...] }
+      if (data && typeof data === 'object' && data.type === 'Buffer' && Array.isArray(data.data)) {
+        var bytes = new Uint8Array(data.data);
+        var str = new TextDecoder().decode(bytes);
+        try { data = JSON.parse(str); } catch (e) { data = str; }
+      }
+      if (typeof data === 'string') {
+        // 尝试 JSON.parse 后格式化
+        try { data = JSON.parse(data); } catch (e) { /* 保持原样 */ }
+      }
+      if (typeof data === 'object') {
+        formatted = syntaxHighlightJSON(data);
+      } else {
+        formatted = escapeHtml(String(data));
+      }
+    } catch (e) {
+      formatted = escapeHtml(String(data));
+    }
+
+    // 截断检查
+    var notice = '';
+    if (formatted.length > 50000) {
+      formatted = formatted.slice(0, 50000);
+      notice = '<div class="truncate-notice">⚠️ 内容过大，仅显示前 50,000 字符</div>';
+    }
+
+    return '<div class="json-viewer">' + formatted + '</div>' + notice;
+  }
+
+  // Headers Tab
+  function renderHeadersPanel(r) {
+    var reqHtml = renderHeadersTable(r.reqHeaders, '请求头');
+    var resHtml = renderHeadersTable(r.resHeaders, '响应头');
+    return '<div class="headers-grid">' +
+      '<div>' +
+        '<div class="headers-section__title">📨 请求头</div>' +
+        reqHtml +
+      '</div>' +
+      '<div>' +
+        '<div class="headers-section__title">📬 响应头</div>' +
+        resHtml +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderHeadersTable(headers, label) {
+    if (!headers || Object.keys(headers).length === 0) {
+      return '<div class="json-viewer__empty">无' + label + '</div>';
+    }
+    var rows = Object.keys(headers).map(function (key) {
+      return '<tr><td>' + escapeHtml(key) + '</td><td>' + escapeHtml(String(headers[key])) + '</td></tr>';
+    }).join('');
+    return '<table class="headers-table">' + rows + '</table>';
+  }
+
+  // JSON 语法高亮
+  function syntaxHighlightJSON(obj) {
+    var json = JSON.stringify(obj, null, 2);
+    // 转义 HTML
+    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // 高亮
+    return json.replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?|\bnull\b)/g,
+      function (match) {
+        var cls = 'json-viewer__number';
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            cls = 'json-viewer__key';
+          } else {
+            cls = 'json-viewer__string';
+          }
+        } else if (/true|false/.test(match)) {
+          cls = 'json-viewer__boolean';
+        } else if (/null/.test(match)) {
+          cls = 'json-viewer__null';
+        }
+        return '<span class="' + cls + '">' + match + '</span>';
+      }
+    );
+  }
+
+  // ==========================================================================
+  // Modal 事件绑定
+  // ==========================================================================
+
+  function initModal() {
+    // 关闭按钮
+    dom.modalClose.addEventListener('click', closeModal);
+
+    // 点击遮罩关闭
+    dom.requestModal.addEventListener('click', function (e) {
+      if (e.target === dom.requestModal) closeModal();
+    });
+
+    // ESC 关闭
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && dom.requestModal.classList.contains('is-visible')) {
+        closeModal();
+      }
+    });
+
+    // Tab 切换
+    dom.modalTabs.addEventListener('click', function (e) {
+      var tab = e.target.closest('.modal__tab');
+      if (tab && tab.dataset.tab) {
+        switchTab(tab.dataset.tab);
+      }
+    });
+  }
+
+  // ==========================================================================
+  // 主题切换
+  // ==========================================================================
+
+  function initTheme() {
+    var saved = localStorage.getItem('cc-butler-theme') || 'bright';
+    applyTheme(saved);
+
+    dom.themeSwitcher.addEventListener('click', function (e) {
+      var btn = e.target.closest('.theme-btn');
+      if (!btn) return;
+      applyTheme(btn.dataset.theme);
+    });
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('cc-butler-theme', theme);
+    // 高亮当前按钮
+    dom.themeSwitcher.querySelectorAll('.theme-btn').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.dataset.theme === theme);
+    });
+  }
+
+  // ==========================================================================
+  // 新增路由
+  // ==========================================================================
+
+  function initAddDeploy() {
+    dom.addDeployBtn.addEventListener('click', function () {
+      dom.addDeployBtn.style.display = 'none';
+      dom.addDeployForm.classList.add('is-visible');
+      dom.addDeployForm.querySelector('input[name="name"]').focus();
+    });
+
+    dom.addDeployCancel.addEventListener('click', function () {
+      dom.addDeployForm.classList.remove('is-visible');
+      dom.addDeployBtn.style.display = '';
+      dom.addDeployForm.reset();
+    });
+
+    dom.addDeployForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var fd = new FormData(dom.addDeployForm);
+      var name = (fd.get('name') || '').trim();
+      var apiKey = (fd.get('apiKey') || '').trim();
+      if (!name || !apiKey) {
+        showToast('❌ 名称和 API Key 不能为空');
+        return;
+      }
+
+      var body = {
+        name: name,
+        baseUrl: (fd.get('baseUrl') || '').trim(),
+        apiKey: apiKey,
+        model: (fd.get('model') || '').trim(),
+      };
+
+      api('/deployments', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+        .then(function () {
+          showToast('✅ 已添加路由: ' + name);
+          dom.addDeployForm.classList.remove('is-visible');
+          dom.addDeployBtn.style.display = '';
+          dom.addDeployForm.reset();
+          loadDeployments();
+        })
+        .catch(function (err) {
+          showToast('❌ 添加失败: ' + err.message);
+        });
+    });
   }
 
   // ==========================================================================
@@ -1198,6 +1539,9 @@
 
   function init() {
     updateConnectionStatus('connecting');
+    initTheme();
+    initModal();
+    initAddDeploy();
     loadDeployments();
     loadRequests();
     loadConfig();
