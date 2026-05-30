@@ -182,14 +182,6 @@
     var percent = 0;
     var barClass = 'dep-card__bar--gray';
     var consumedText = '暂无数据';
-    var lastUpdated = '';
-
-    if (tokenData && tokenData.lastUpdated) {
-      lastUpdated = new Date(tokenData.lastUpdated).toLocaleString('zh-CN', {
-        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-      });
-    }
-
     if (tokenData && tokenData.percentage != null) {
       percent = Math.round(tokenData.percentage);
       var currency = '';
@@ -230,7 +222,7 @@
             '<div class="dep-card__bar ' + barClass + '" style="width:' + Math.max(2, percent) + '%"></div>' +
           '</div>' +
         '</div>' +
-        (lastUpdated ? '<div class="dep-card__footer">' + lastUpdated + '</div>' : '') +
+        '</div>' +
       '</div>'
     );
   }
