@@ -17,7 +17,7 @@ function maskKey(key) {
 // ---------------------------------------------------------------------------
 // 创建 admin 模块
 // ---------------------------------------------------------------------------
-function createAdmin(config, healthChecker, routerEngine) {
+function createAdmin(config, healthChecker, routerEngine, tokenScanner, skillStore, skillHunter, skillEvaluator) {
   const router = express.Router();
 
   // =========================================================================
@@ -221,6 +221,151 @@ function createAdmin(config, healthChecker, routerEngine) {
   });
 
   // =========================================================================
+  // REST API — Token Scanner
+  // =========================================================================
+
+  // 获取 token 余额缓存
+  router.get('/token/status', (_req, res) => {
+    try {
+      const data = tokenScanner.getCachedData();
+      res.json(data || { lastScanAt: null, deployments: {} });
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // 手动触发 token 扫描
+  router.post('/token/scan', async (_req, res) => {
+    try {
+      const result = await tokenScanner.scan();
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // =========================================================================
+  // REST API — Skills
+  // =========================================================================
+
+  // 获取所有 skill 列表
+  router.get('/skills', (req, res) => {
+    try {
+      const { status, category, q } = req.query;
+      let skills;
+
+      if (q) {
+        skills = skillStore.search(q);
+      } else if (status) {
+        skills = skillStore.getByStatus(status);
+      } else if (category) {
+        skills = skillStore.getByCategory(category);
+      } else {
+        skills = skillStore.getAll();
+      }
+
+      res.json({ skills });
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // Skill 统计信息
+  router.get('/skills/stats', (_req, res) => {
+    try {
+      const stats = skillStore.getStats();
+      res.json(stats);
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // 单个 skill 详情
+  router.get('/skills/:id', (req, res) => {
+    try {
+      const skill = skillStore.getById(req.params.id);
+      if (!skill) {
+        return res.status(404).json({ error: { message: 'Skill 不存在' } });
+      }
+
+      // 尝试加载详情内容
+      const content = skillStore.getContent(req.params.id);
+
+      // 尝试加载评估历史
+      const history = skillEvaluator.getHistory(req.params.id);
+
+      res.json({ ...skill, content: content || null, evaluationHistory: history });
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // 手动触发 skill 搜集
+  router.post('/skills/hunt', async (_req, res) => {
+    try {
+      const result = await skillHunter.hunt();
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // 触发单个 skill 评估
+  router.post('/skills/:id/evaluate', async (req, res) => {
+    try {
+      const result = await skillEvaluator.evaluate(req.params.id);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // 安装 skill
+  router.post('/skills/:id/install', (req, res) => {
+    try {
+      const result = skillEvaluator.install(req.params.id);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // 触发 skill 进化（需要 body.skillIds 数组）
+  router.post('/skills/:id/evolve', async (req, res) => {
+    try {
+      const { skillIds } = req.body;
+      // 如果没有提供 skillIds，用当前 skill 作为种子，需要至少再加一个
+      const ids = Array.isArray(skillIds) && skillIds.length >= 2
+        ? skillIds
+        : null;
+
+      if (!ids) {
+        return res.status(400).json({
+          error: { message: '进化需要至少 2 个 skill，请通过 body.skillIds 传入' },
+        });
+      }
+
+      const result = await skillEvaluator.evolve(ids);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // 删除 skill
+  router.delete('/skills/:id', (req, res) => {
+    try {
+      const ok = skillStore.remove(req.params.id);
+      if (!ok) {
+        return res.status(404).json({ error: { message: 'Skill 不存在' } });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // =========================================================================
   // SSE Handler
   // =========================================================================
   function sseHandler(req, res) {
@@ -271,6 +416,28 @@ function createAdmin(config, healthChecker, routerEngine) {
     config.bus.on('deployment.cooldown', onCooldown);
     config.bus.on('deployment.recovered', onRecovered);
 
+    // ---- Token Scanner 事件 ----
+    const onTokenUpdated = (data) => sendEvent('token.updated', data);
+    const onTokenAlert = (data) => sendEvent('token.alert', data);
+
+    config.bus.on('token.updated', onTokenUpdated);
+    config.bus.on('token.alert', onTokenAlert);
+
+    // ---- Skill Hunter / Evaluator 事件 ----
+    const onSkillsHunted = (data) => sendEvent('skills.hunted', data);
+    const onSkillEvaluated = (data) => sendEvent('skill.evaluated', data);
+    const onSkillEvolved = (data) => sendEvent('skill.evolved', data);
+    const onHuntStart = (data) => sendEvent('hunt.start', data);
+    const onHuntProgress = (data) => sendEvent('hunt.progress', data);
+    const onHuntComplete = (data) => sendEvent('hunt.complete', data);
+
+    config.bus.on('skills.hunted', onSkillsHunted);
+    config.bus.on('skill.evaluated', onSkillEvaluated);
+    config.bus.on('skill.evolved', onSkillEvolved);
+    config.bus.on('hunt.start', onHuntStart);
+    config.bus.on('hunt.progress', onHuntProgress);
+    config.bus.on('hunt.complete', onHuntComplete);
+
     // ---- 客户端断开时清理 ----
     req.on('close', () => {
       clearInterval(heartbeat);
@@ -286,6 +453,16 @@ function createAdmin(config, healthChecker, routerEngine) {
       config.bus.off('active:changed', onDeploymentsUpdated);
       config.bus.off('deployment.cooldown', onCooldown);
       config.bus.off('deployment.recovered', onRecovered);
+
+      config.bus.off('token.updated', onTokenUpdated);
+      config.bus.off('token.alert', onTokenAlert);
+
+      config.bus.off('skills.hunted', onSkillsHunted);
+      config.bus.off('skill.evaluated', onSkillEvaluated);
+      config.bus.off('skill.evolved', onSkillEvolved);
+      config.bus.off('hunt.start', onHuntStart);
+      config.bus.off('hunt.progress', onHuntProgress);
+      config.bus.off('hunt.complete', onHuntComplete);
     });
   }
 

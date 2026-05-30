@@ -29,9 +29,14 @@
   // ==========================================================================
   let sse = null;
   let reconnectTimer = null;
+  let reconnectDelay = 1000;       // 初始退避 1s
+  var MAX_RECONNECT_DELAY = 30000; // 最大退避 30s
   let deployments = [];
   let requests = [];
   let config = {};
+
+  // rAF 合并渲染标记
+  var renderScheduled = false;
 
   // ==========================================================================
   // 工具函数
@@ -254,18 +259,36 @@
   }
 
   // ==========================================================================
-  // 渲染：请求列表
+  // 渲染：请求列表（增量更新）
   // ==========================================================================
+
+  // id → DOM element 缓存
+  var requestElCache = new Map();
 
   function renderRequests() {
     dom.requestCount.textContent = requests.length + ' 条';
 
     if (requests.length === 0) {
       dom.requestList.innerHTML = '<div class="empty-state"><span class="empty-state__emoji">📭</span>暂无请求</div>';
+      requestElCache.clear();
       return;
     }
 
-    dom.requestList.innerHTML = requests.map(function (r) {
+    // 移除不在当前数据中的缓存元素
+    var currentIds = new Set(requests.map(function (r) { return r.id; }));
+    requestElCache.forEach(function (el, id) {
+      if (!currentIds.has(id)) {
+        var detail = document.getElementById('detail-' + id);
+        if (detail) detail.remove();
+        el.remove();
+        requestElCache.delete(id);
+      }
+    });
+
+    // 构建已有 id 集合，用于判断新增
+    var existingIds = new Set(requestElCache.keys());
+
+    requests.forEach(function (r, index) {
       var dur = r.endedAt ? formatDuration(r.endedAt - r.startedAt) : '...';
       var sc = statusClass(r.status);
       var emoji = statusEmoji(r.status);
@@ -273,30 +296,62 @@
       var path = r.path || '--';
       var depName = r.deploymentName || '--';
 
-      var html =
-        '<div class="request-item" data-id="' + r.id + '">' +
+      if (existingIds.has(r.id)) {
+        // 增量更新：只修改变化的属性
+        var el = requestElCache.get(r.id);
+        var methodEl = el.querySelector('.request-item__method');
+        var pathEl = el.querySelector('.request-item__path');
+        var statusEl = el.querySelector('.request-item__status');
+        var durationEl = el.querySelector('.request-item__duration');
+        var deploymentEl = el.querySelector('.request-item__deployment');
+
+        if (methodEl) methodEl.textContent = method;
+        if (pathEl) pathEl.textContent = path;
+        if (statusEl) {
+          statusEl.className = 'request-item__status request-item__status--' + sc;
+          statusEl.textContent = emoji + ' ' + (r.status || '--');
+        }
+        if (durationEl) durationEl.textContent = dur;
+        if (deploymentEl) deploymentEl.textContent = depName;
+
+        // 更新详情内容
+        var detailEl = document.getElementById('detail-' + r.id);
+        if (detailEl) {
+          detailEl.innerHTML = renderRequestDetail(r);
+        }
+      } else {
+        // 新增记录：用 DocumentFragment 构建
+        var itemEl = document.createElement('div');
+        itemEl.className = 'request-item';
+        itemEl.dataset.id = r.id;
+        itemEl.innerHTML =
           '<span class="request-item__method">' + method + '</span>' +
           '<span class="request-item__path">' + escapeHtml(path) + '</span>' +
           '<span class="request-item__status request-item__status--' + sc + '">' + emoji + ' ' + (r.status || '--') + '</span>' +
           '<span class="request-item__duration">' + dur + '</span>' +
-          '<span class="request-item__deployment">' + escapeHtml(depName) + '</span>' +
-        '</div>' +
-        '<div class="request-detail" id="detail-' + r.id + '">' +
-          renderRequestDetail(r) +
-        '</div>';
+          '<span class="request-item__deployment">' + escapeHtml(depName) + '</span>';
 
-      return html;
-    }).join('');
+        var detailEl = document.createElement('div');
+        detailEl.className = 'request-detail';
+        detailEl.id = 'detail-' + r.id;
+        detailEl.innerHTML = renderRequestDetail(r);
 
-    // 绑定展开/收起
-    dom.requestList.querySelectorAll('.request-item').forEach(function (el) {
-      el.addEventListener('click', function () {
-        var id = this.dataset.id;
-        var detail = document.getElementById('detail-' + id);
-        if (detail) {
-          detail.classList.toggle('is-visible');
+        // 绑定展开/收起
+        itemEl.addEventListener('click', function () {
+          detailEl.classList.toggle('is-visible');
+        });
+
+        requestElCache.set(r.id, itemEl);
+
+        // 新增记录 prepend 到列表头部
+        if (dom.requestList.firstChild) {
+          dom.requestList.insertBefore(itemEl, dom.requestList.firstChild);
+          dom.requestList.insertBefore(detailEl, itemEl.nextSibling);
+        } else {
+          dom.requestList.appendChild(itemEl);
+          dom.requestList.appendChild(detailEl);
         }
-      });
+      }
     });
   }
 
@@ -350,6 +405,16 @@
   // SSE 连接
   // ==========================================================================
 
+  // rAF 合并渲染：SSE 事件只更新 state，用 requestAnimationFrame 合并到下一帧统一渲染
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(function () {
+      renderScheduled = false;
+      renderRequests();
+    });
+  }
+
   function connectSSE() {
     if (sse) {
       sse.close();
@@ -358,6 +423,8 @@
     sse = new EventSource('/events');
 
     sse.addEventListener('connected', function () {
+      // 连接成功，重置退避
+      reconnectDelay = 1000;
       updateConnectionStatus('connected');
       showToast('✅ SSE 已连接');
     });
@@ -374,7 +441,7 @@
         }
         // 保持最多 50 条
         if (requests.length > 50) requests.length = 50;
-        renderRequests();
+        scheduleRender();
       } catch (err) { /* ignore */ }
     });
 
@@ -387,7 +454,7 @@
         } else {
           requests.unshift(record);
         }
-        renderRequests();
+        scheduleRender();
       } catch (err) { /* ignore */ }
     });
 
@@ -424,7 +491,16 @@
 
     sse.onerror = function () {
       updateConnectionStatus('disconnected');
-      // 自动重连由 EventSource 内置处理
+      sse.close();
+      sse = null;
+      // 指数退避重连 + resync 全量数据
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(function () {
+        loadDeployments();
+        loadRequests();
+        connectSSE();
+      }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
     };
   }
 

@@ -8,6 +8,10 @@ const { createHealthChecker } = require('./health-checker');
 const { createRouterEngine } = require('./router-engine');
 const { createProxy } = require('./proxy');
 const { createAdmin } = require('./admin');
+const { createTokenScanner } = require('./token-scanner');
+const { createSkillStore } = require('./skill-store');
+const { createSkillHunter } = require('./skill-hunter');
+const { createSkillEvaluator } = require('./skill-evaluator');
 
 // ---------------------------------------------------------------------------
 // 初始化配置
@@ -24,9 +28,35 @@ const routerEngine = createRouterEngine(config, healthChecker);
 const proxyRouter = createProxy(config, routerEngine, healthChecker);
 
 // ---------------------------------------------------------------------------
+// Phase 2/3 模块初始化
+// ---------------------------------------------------------------------------
+
+// Token Scanner — 定时扫描各 deployment 的 token 余额
+const tokenScanner = createTokenScanner(config, config.bus);
+if (config.getConfig().tokenScanner?.enabled) {
+  tokenScanner.start();
+}
+
+// Skill Store — 管理 skill 索引和缓存
+const skillStore = createSkillStore(config.bus);
+skillStore.load();
+
+// Skill Hunter — 从 GitHub 等源搜集 skill 信息
+const skillHunter = createSkillHunter(skillStore, config.getConfig(), config.bus);
+if (config.getConfig().skillHunter?.autoHunt) {
+  skillHunter.startAutoHunt();
+}
+
+// Skill Evaluator — 评估、进化、安装 skill
+const skillEvaluator = createSkillEvaluator(skillStore, config.bus);
+
+// ---------------------------------------------------------------------------
 // 创建 admin（REST API + SSE）
 // ---------------------------------------------------------------------------
-const { router: adminRouter, sseHandler } = createAdmin(config, healthChecker, routerEngine);
+const { router: adminRouter, sseHandler } = createAdmin(
+  config, healthChecker, routerEngine,
+  tokenScanner, skillStore, skillHunter, skillEvaluator
+);
 
 // ---------------------------------------------------------------------------
 // Express 应用组装

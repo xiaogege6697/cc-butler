@@ -43,7 +43,7 @@ body {
   overflow-x: hidden;
 }
 
-/* 速度线装饰背景 */
+/* 速度线装饰背景 — 多层戏剧化效果 */
 body::before {
   content: '';
   position: fixed;
@@ -52,12 +52,27 @@ body::before {
   width: 100%;
   height: 100%;
   background:
+    /* 主速度线：45deg 对角，透明度 0.04 */
     repeating-linear-gradient(
       -45deg,
       transparent,
       transparent 80px,
-      rgba(233, 69, 96, 0.015) 80px,
-      rgba(233, 69, 96, 0.015) 81px
+      rgba(233, 69, 96, 0.04) 80px,
+      rgba(233, 69, 96, 0.04) 81px
+    ),
+    /* 副速度线：更细更密（40px 间隔），青色，透明度 0.02 */
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 40px,
+      rgba(0, 210, 255, 0.02) 40px,
+      rgba(0, 210, 255, 0.02) 40.5px
+    ),
+    /* 径向渐变集中线：从顶部中心扩散 */
+    radial-gradient(
+      ellipse 60% 50% at 50% 0%,
+      rgba(233, 69, 96, 0.03) 0%,
+      transparent 70%
     );
   pointer-events: none;
   z-index: 0;
@@ -185,6 +200,7 @@ body::before {
    卡片 Card
    ========================================================================= */
 .card {
+  position: relative;
   background: var(--bg-card);
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius);
@@ -195,6 +211,20 @@ body::before {
 
 .card:hover {
   box-shadow: var(--shadow-comic-hover);
+}
+
+/* 漫画半色调网点 */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 8px 8px;
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 /* 漫画风微倾斜 */
@@ -249,25 +279,62 @@ body::before {
   border-radius: 6px;
   overflow: hidden;
   border: 1.5px solid rgba(255, 255, 255, 0.05);
+  position: relative;
 }
 
 .progress-card__bar {
+  position: relative;
   height: 100%;
   border-radius: 6px;
   transition: width 0.6s ease;
   min-width: 2%;
+  overflow: hidden;
 }
 
 .progress-card__bar--green {
   background: linear-gradient(90deg, #00d2ff, #3a7bd5);
 }
 
+.progress-card__bar--green::after {
+  background: linear-gradient(90deg, transparent, rgba(0, 210, 255, 0.4), transparent);
+}
+
 .progress-card__bar--yellow {
   background: linear-gradient(90deg, #ffd700, #ff8c42);
 }
 
+.progress-card__bar--yellow::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 215, 0, 0.4), transparent);
+}
+
 .progress-card__bar--red {
   background: linear-gradient(90deg, #ff4757, #ff6b81);
+  animation: barPulse 2s ease infinite;
+}
+
+.progress-card__bar--red::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 71, 87, 0.4), transparent);
+}
+
+/* 进度条光泽扫描动画 */
+.progress-card__bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  animation: shimmer 3s ease infinite;
+}
+
+@keyframes shimmer {
+  0% { left: -100%; }
+  100% { left: 200%; }
+}
+
+@keyframes barPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 /* 状态 emoji */
@@ -381,7 +448,7 @@ body::before {
   background: var(--bg-input);
   border: 2px solid var(--text-dim);
   border-radius: 12px;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  transition: background 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .toggle__thumb {
@@ -392,12 +459,17 @@ body::before {
   height: 16px;
   background: var(--text-dim);
   border-radius: 50%;
-  transition: transform var(--transition-fast), background var(--transition-fast);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.toggle:active .toggle__thumb {
+  transform: scale(0.85);
 }
 
 .toggle input:checked + .toggle__track {
   background: var(--accent-green);
   border-color: var(--accent-green);
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.4);
 }
 
 .toggle input:checked + .toggle__track .toggle__thumb {
