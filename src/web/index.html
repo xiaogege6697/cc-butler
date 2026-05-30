@@ -26,22 +26,17 @@
   </header>
 
   <main class="dashboard">
-    <!-- Token 余额区 -->
-    <section class="section">
-      <div class="section__header">
-        <h2 class="section__title"><span class="emoji">📊</span> Token 余额</h2>
-        <button class="section__meta section__meta--btn" id="tokenUpdateTime" title="刷新数据">--</button>
-      </div>
-      <div class="progress-grid" id="progressGrid">
-        <!-- JS 动态渲染 -->
-      </div>
-    </section>
-
-    <!-- 路由状态区 -->
+    <!-- 路由优先级区（含 Token 消耗） -->
     <section class="section">
       <div class="section__header">
         <h2 class="section__title"><span class="emoji">🔀</span> 路由优先级</h2>
-        <span class="section__meta" id="depSummary">--</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="section__meta" id="depSummary">--</span>
+          <button class="section__meta section__meta--btn" id="tokenUpdateTime" title="刷新数据">--</button>
+        </div>
+      </div>
+      <div class="progress-grid" id="progressGrid">
+        <!-- JS 动态渲染 Token 消耗卡片 -->
       </div>
       <div class="card card--deployment-list" id="deploymentList">
         <!-- 活跃路由区 -->
