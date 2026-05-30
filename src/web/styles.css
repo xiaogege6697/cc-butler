@@ -519,17 +519,43 @@ body::before {
   filter: none;
 }
 
-/* 卡片顶部：名称 + 模型 + 健康点 */
+/* 卡片顶部：拖拽手柄 + 名称 + 优先级 */
 .dep-card__header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 8px;
+}
+
+/* 拖拽手柄 — 跟随 header 排列 */
+.dep-card__drag-handle {
+  font-size: 14px;
+  color: var(--text-dim);
+  cursor: grab;
+  padding: 2px 2px 2px 0;
+  border-radius: 3px;
+  transition: color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast);
+  opacity: 0.3;
+  flex-shrink: 0;
+  user-select: none;
+  line-height: 1;
+}
+
+.dep-card:hover .dep-card__drag-handle { opacity: 0.7; }
+
+.dep-card__drag-handle:hover {
+  opacity: 1 !important;
+  color: var(--accent-purple);
+  background: rgba(124, 106, 172, 0.1);
+}
+
+.dep-card__drag-handle:active {
+  cursor: grabbing;
+  color: var(--accent-green);
 }
 
 .dep-card__left {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
   flex: 1;
@@ -540,7 +566,7 @@ body::before {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .dep-card__health-dot--healthy { background: var(--accent-green); }
@@ -642,36 +668,6 @@ body::before {
   font-size: 10px;
   color: var(--text-dim);
   opacity: 0.7;
-}
-
-/* 拖拽手柄 */
-.dep-card__drag-handle {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  transform: translateY(-50%);
-  font-size: 14px;
-  color: var(--text-dim);
-  cursor: grab;
-  padding: 4px;
-  border-radius: 3px;
-  transition: color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast);
-  opacity: 0;
-  z-index: 2;
-  user-select: none;
-}
-
-.dep-card:hover .dep-card__drag-handle { opacity: 0.7; }
-
-.dep-card__drag-handle:hover {
-  opacity: 1 !important;
-  color: var(--accent-purple);
-  background: rgba(124, 106, 172, 0.1);
-}
-
-.dep-card__drag-handle:active {
-  cursor: grabbing;
-  color: var(--accent-green);
 }
 
 /* =========================================================================

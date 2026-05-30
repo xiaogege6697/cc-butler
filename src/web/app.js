@@ -210,8 +210,8 @@
 
     return (
       '<div class="dep-card' + stagingClass + '" draggable="true" data-id="' + d.id + '" data-order="' + d.order + '" data-enabled="' + d.enabled + '">' +
-        '<span class="dep-card__drag-handle" title="拖拽排序">⠿</span>' +
         '<div class="dep-card__header">' +
+          '<span class="dep-card__drag-handle" title="拖拽排序">⠿</span>' +
           '<div class="dep-card__left">' +
             '<span class="dep-card__health-dot ' + dotClass + '"></span>' +
             '<div class="dep-card__title-area">' +
