@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { createInitializedRegistry } = require('./providers');
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -37,62 +38,10 @@ function readCache() {
     if (!fs.existsSync(CACHE_PATH)) return null;
     const raw = fs.readFileSync(CACHE_PATH, 'utf8');
     return JSON.parse(raw);
-  } catch {
+  } catch (err) {
+    console.warn(`[token-scanner] 缓存文件读取失败（可能已损坏）: ${err.message}`);
     return null;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Provider 模拟数据生成器
-// 根据 deployment 的 baseUrl 判断 provider 类型，生成模拟余额数据
-// ---------------------------------------------------------------------------
-const PROVIDERS = {
-  xiaomi: {
-    match: (baseUrl) => /xiaomi|mi.*mimo|mimo/i.test(baseUrl || ''),
-    generate: (dep) => ({
-      balance: 192.5,
-      totalQuota: 500,
-      usedQuota: 307.5,
-      percentage: 61.5,
-      source: 'mock',
-      raw: {
-        provider: 'xiaomi-mimo',
-        plan: 'free-tier',
-        mock: true,
-      },
-    }),
-  },
-  zhipu: {
-    match: (baseUrl) => /zhipu|bigmodel|glm/i.test(baseUrl || ''),
-    generate: (dep) => ({
-      balance: 85.0,
-      totalQuota: 100,
-      usedQuota: 15.0,
-      percentage: 15.0,
-      source: 'mock',
-      raw: {
-        provider: 'zhipu-glm',
-        plan: 'standard',
-        mock: true,
-      },
-    }),
-  },
-};
-
-// 未知 provider 的默认模拟数据
-function generateDefaultMock(dep) {
-  return {
-    balance: null,
-    totalQuota: null,
-    usedQuota: null,
-    percentage: null,
-    source: 'mock',
-    raw: {
-      provider: 'unknown',
-      baseUrl: dep.baseUrl,
-      mock: true,
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -108,20 +57,57 @@ function createTokenScanner(config, bus) {
   let _lastResult = null; // 内存缓存
   const _credentials = new Map(); // deploymentId -> { username, password, cookie }
 
+  // 初始化 provider adapter registry
+  const customAdapters = config.getConfig()?.tokenScanner?.customAdapters || [];
+  const registry = createInitializedRegistry(customAdapters);
+
   // =========================================================================
   // 内部方法
   // =========================================================================
 
   /**
-   * 识别 deployment 的 provider 类型，获取模拟数据
+   * 通过 adapter registry 获取真实余额数据
    */
-  function fetchBalance(dep) {
-    for (const [, provider] of Object.entries(PROVIDERS)) {
-      if (provider.match(dep.baseUrl)) {
-        return provider.generate(dep);
-      }
+  async function fetchBalance(dep) {
+    const depConfig = dep; // deployment config may have balanceAdapter override
+    const adapter = registry.find(dep, depConfig);
+
+    if (!adapter) {
+      // No matching adapter, return null-source result
+      return {
+        balance: null, totalQuota: null, usedQuota: null,
+        percentage: null, currency: null, plan: null, resetAt: null,
+        source: 'no-adapter',
+        raw: { provider: 'unknown', baseUrl: dep.baseUrl },
+      };
     }
-    return generateDefaultMock(dep);
+
+    // Resolve apiKey if it's env:XXX format
+    const apiKey = dep.apiKey?.startsWith('env:')
+      ? process.env[dep.apiKey.slice(4)]
+      : dep.apiKey;
+
+    const result = await adapter.fetch({ ...dep, apiKey }, depConfig);
+
+    // Calculate percentage from balance/totalQuota if available
+    let percentage = null;
+    if (result.totalQuota && result.totalQuota > 0 && result.usedQuota != null && Number.isFinite(result.usedQuota)) {
+      percentage = Math.round((result.usedQuota / result.totalQuota) * 100);
+    } else if (result.balance != null && result.totalQuota && result.totalQuota > 0 && Number.isFinite(result.balance)) {
+      percentage = Math.round(((result.totalQuota - result.balance) / result.totalQuota) * 100);
+    }
+
+    return {
+      balance: result.balance ?? null,
+      totalQuota: result.totalQuota ?? null,
+      usedQuota: result.usedQuota ?? null,
+      percentage,
+      currency: result.currency ?? null,
+      plan: result.plan ?? null,
+      resetAt: result.resetAt ?? null,
+      source: result.source || 'adapter',
+      raw: result.raw || {},
+    };
   }
 
   /**
@@ -148,7 +134,7 @@ function createTokenScanner(config, bus) {
 
     for (const dep of deployments) {
       try {
-        const balanceData = fetchBalance(dep);
+        const balanceData = await fetchBalance(dep);
         balanceData.lastUpdated = now;
 
         cache.deployments[dep.id] = balanceData;
@@ -164,15 +150,24 @@ function createTokenScanner(config, bus) {
         }
       } catch (err) {
         // 单个 deployment 失败不影响其他
-        cache.deployments[dep.id] = {
-          balance: null,
-          totalQuota: null,
-          usedQuota: null,
-          percentage: null,
-          source: 'error',
-          lastUpdated: now,
-          raw: { error: err.message },
-        };
+        const previous = _lastResult?.deployments?.[dep.id] || readCache()?.deployments?.[dep.id];
+        if (previous && previous.source !== 'error') {
+          // Keep previous data but mark as stale
+          cache.deployments[dep.id] = {
+            ...previous,
+            stale: true,
+            lastError: err.message,
+            lastUpdated: now,
+          };
+        } else {
+          cache.deployments[dep.id] = {
+            balance: null, totalQuota: null, usedQuota: null,
+            percentage: null, currency: null, plan: null, resetAt: null,
+            source: 'error',
+            lastUpdated: now,
+            raw: { error: err.message },
+          };
+        }
       }
     }
 
@@ -204,6 +199,10 @@ function createTokenScanner(config, bus) {
       console.log('[token-scanner] 定时扫描已禁用');
       return;
     }
+
+    // 重新加载自定义 adapters
+    const customAdapters = cfg.tokenScanner?.customAdapters || [];
+    registry.loadCustomAdapters(customAdapters);
 
     const intervalHours = scannerConfig.intervalHours || 6;
     const intervalMs = intervalHours * 60 * 60 * 1000;
@@ -269,13 +268,24 @@ function createTokenScanner(config, bus) {
    * @param {object} credentials - { username, password, cookie }
    */
   function setCredentials(deploymentId, credentials) {
-    _credentials.set(deploymentId, {
+    // 清理 deploymentId 防止日志注入
+    const safeId = String(deploymentId).replace(/[\r\n]/g, '').slice(0, 100);
+    _credentials.set(safeId, {
       username: credentials.username || '',
       password: credentials.password || '',
       cookie: credentials.cookie || '',
       updatedAt: new Date().toISOString(),
     });
-    console.log(`[token-scanner] 已设置 ${deploymentId} 的登录凭据`);
+    console.log(`[token-scanner] 已设置 ${safeId} 的登录凭据`);
+  }
+
+  /**
+   * 清除指定 deployment 的凭据
+   * @param {string} deploymentId
+   */
+  function clearCredentials(deploymentId) {
+    _credentials.delete(deploymentId);
+    console.log(`[token-scanner] 已清除 ${deploymentId} 的登录凭据`);
   }
 
   /**
@@ -293,6 +303,8 @@ function createTokenScanner(config, bus) {
     getCachedData,
     setCredentials,
     getCredentials,
+    clearCredentials,
+    getRegistry: () => registry,
   };
 }
 

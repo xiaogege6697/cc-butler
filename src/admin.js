@@ -244,6 +244,33 @@ function createAdmin(config, healthChecker, routerEngine, tokenScanner, skillSto
     }
   });
 
+  // 存储 cookie credentials（用于 token-scanner 需要 cookie 认证的场景）
+  router.post('/token/credentials', (req, res) => {
+    const { deploymentId, credentials } = req.body;
+    if (!deploymentId || !credentials) {
+      return res.status(400).json({ error: 'deploymentId and credentials required' });
+    }
+    // 验证 deploymentId 是否对应真实 deployment
+    const deployments = config.getDeployments();
+    const validIds = new Set(deployments.map(d => d.id));
+    if (!validIds.has(deploymentId)) {
+      return res.status(400).json({ error: `Unknown deployment: ${deploymentId}` });
+    }
+    // 验证 credentials 结构
+    if (typeof credentials !== 'object' || (!credentials.cookie && !credentials.username)) {
+      return res.status(400).json({ error: 'credentials must contain cookie or username' });
+    }
+    if (typeof tokenScanner.setCredentials !== 'function') {
+      return res.status(501).json({ error: 'setCredentials not supported by current tokenScanner' });
+    }
+    try {
+      tokenScanner.setCredentials(deploymentId, credentials);
+      res.json({ ok: true, deploymentId });
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
   // =========================================================================
   // REST API — Skills
   // =========================================================================
