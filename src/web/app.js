@@ -32,6 +32,7 @@
     toastContainer: $('#toastContainer'),
     // 主题
     themeSwitcher: $('#themeSwitcher'),
+    refreshBtn: $('#refreshBtn'),
     // 新增路由
     addDeployBtn: $('#addDeployBtn'),
     addDeployForm: $('#addDeployForm'),
@@ -1246,6 +1247,28 @@
   }
 
   // ==========================================================================
+  // 刷新按钮
+  // ==========================================================================
+
+  function initRefresh() {
+    dom.refreshBtn.addEventListener('click', function () {
+      dom.refreshBtn.style.opacity = '0.5';
+      dom.refreshBtn.style.pointerEvents = 'none';
+      // 全量刷新
+      Promise.all([
+        loadDeployments(),
+        loadRequests(),
+        loadConfig(),
+      ]).finally(function () {
+        setTimeout(function () {
+          dom.refreshBtn.style.opacity = '';
+          dom.refreshBtn.style.pointerEvents = '';
+        }, 500);
+      });
+    });
+  }
+
+  // ==========================================================================
   // 主题切换
   // ==========================================================================
 
@@ -1542,6 +1565,7 @@
     initTheme();
     initModal();
     initAddDeploy();
+    initRefresh();
     loadDeployments();
     loadRequests();
     loadConfig();
