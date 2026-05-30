@@ -454,6 +454,8 @@ function createAdmin(config, healthChecker, routerEngine, tokenScanner, skillSto
     const onSkillsHunted = (data) => sendEvent('skills.hunted', data);
     const onSkillEvaluated = (data) => sendEvent('skill.evaluated', data);
     const onSkillEvolved = (data) => sendEvent('skill.evolved', data);
+    const onSkillInstalled = (data) => sendEvent('skill.installed', data);
+    const onSkillDiscovered = (data) => sendEvent('skill.discovered', data);
     const onHuntStart = (data) => sendEvent('hunt.start', data);
     const onHuntProgress = (data) => sendEvent('hunt.progress', data);
     const onHuntComplete = (data) => sendEvent('hunt.complete', data);
@@ -461,6 +463,8 @@ function createAdmin(config, healthChecker, routerEngine, tokenScanner, skillSto
     config.bus.on('skills.hunted', onSkillsHunted);
     config.bus.on('skill.evaluated', onSkillEvaluated);
     config.bus.on('skill.evolved', onSkillEvolved);
+    config.bus.on('skill.installed', onSkillInstalled);
+    config.bus.on('skill.discovered', onSkillDiscovered);
     config.bus.on('hunt.start', onHuntStart);
     config.bus.on('hunt.progress', onHuntProgress);
     config.bus.on('hunt.complete', onHuntComplete);
@@ -487,6 +491,8 @@ function createAdmin(config, healthChecker, routerEngine, tokenScanner, skillSto
       config.bus.off('skills.hunted', onSkillsHunted);
       config.bus.off('skill.evaluated', onSkillEvaluated);
       config.bus.off('skill.evolved', onSkillEvolved);
+      config.bus.off('skill.installed', onSkillInstalled);
+      config.bus.off('skill.discovered', onSkillDiscovered);
       config.bus.off('hunt.start', onHuntStart);
       config.bus.off('hunt.progress', onHuntProgress);
       config.bus.off('hunt.complete', onHuntComplete);

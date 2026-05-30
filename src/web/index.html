@@ -46,12 +46,18 @@
       <div class="section__header">
         <h2 class="section__title"><span class="emoji">🔮</span> Skill 库</h2>
         <div class="section__controls">
+          <button class="btn btn--hunt" id="skillHuntBtn">🔍 手动搜集</button>
           <span class="section__label">🔄 自动搜集</span>
           <label class="toggle">
             <input type="checkbox" id="autoHuntToggle">
             <span class="toggle__track"><span class="toggle__thumb"></span></span>
           </label>
         </div>
+      </div>
+      <div class="skill-stats" id="skillStats"></div>
+      <div class="skill-toolbar">
+        <input type="text" class="skill-search" id="skillSearch" placeholder="搜索 skill 名称、描述或标签...">
+        <div class="skill-filters" id="skillFilters"></div>
       </div>
       <div class="skill-list" id="skillList">
         <!-- JS 动态渲染 -->

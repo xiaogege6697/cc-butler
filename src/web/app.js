@@ -18,6 +18,10 @@
     progressGrid: $('#progressGrid'),
     deploymentList: $('#deploymentList'),
     autoHuntToggle: $('#autoHuntToggle'),
+    skillHuntBtn: $('#skillHuntBtn'),
+    skillStats: $('#skillStats'),
+    skillSearch: $('#skillSearch'),
+    skillFilters: $('#skillFilters'),
     skillList: $('#skillList'),
     requestCount: $('#requestCount'),
     requestList: $('#requestList'),
@@ -36,6 +40,12 @@
   let requests = [];
   let config = {};
   var dragState = null;        // 拖动排序状态
+
+  // Skill 库状态
+  var skills = [];
+  var skillStats = {};
+  var skillFilter = { q: '', category: '' };
+  var skillSearchTimer = null;
 
   // rAF 合并渲染标记
   var renderScheduled = false;
@@ -199,22 +209,28 @@
       // token 余额进度条
       var tokenData = tokenStatus[d.id];
       var percent = 0;
-      var barClass = 'dep-card__bar--green';
+      var barClass = 'dep-card__bar--gray';
       var balanceText = '无余额数据';
+      var hasData = false;
 
       if (tokenData && tokenData.percentage != null) {
         percent = Math.round(tokenData.percentage);
+        hasData = true;
         balanceText = (tokenData.usedQuota != null && tokenData.totalQuota != null)
           ? tokenData.usedQuota.toFixed(1) + ' / ' + tokenData.totalQuota.toFixed(1)
           : percent + '%';
       } else if (tokenData && tokenData.balance != null) {
-        // 有余额但无 percentage，估算
+        hasData = true;
         percent = Math.min(100, Math.max(0, Math.round(tokenData.balance)));
         balanceText = '余额 ' + tokenData.balance.toFixed(1);
       }
 
-      if (percent < 30) barClass = 'dep-card__bar--red';
-      else if (percent < 60) barClass = 'dep-card__bar--yellow';
+      // 色彩逻辑：percent 是已用百分比，越高越危险
+      if (hasData) {
+        if (percent >= 80) barClass = 'dep-card__bar--red';
+        else if (percent >= 50) barClass = 'dep-card__bar--yellow';
+        else barClass = 'dep-card__bar--green';
+      }
 
       if (!d.enabled) {
         barClass = 'dep-card__bar--red';
@@ -222,7 +238,37 @@
 
       // 颜色值用于百分比文字
       var percentColor = barClass.includes('green') ? 'var(--accent-green)'
-        : barClass.includes('yellow') ? 'var(--accent-yellow)' : 'var(--accent-red)';
+        : barClass.includes('yellow') ? 'var(--accent-yellow)'
+        : barClass.includes('gray') ? 'var(--text-dim)' : 'var(--accent-red)';
+
+      // 货币符号
+      var currencyHtml = '';
+      if (tokenData && tokenData.currency) {
+        var symbol = tokenData.currency;
+        if (tokenData.currency === 'CNY' || tokenData.currency === 'cny') symbol = '¥';
+        else if (tokenData.currency === 'USD' || tokenData.currency === 'usd') symbol = '$';
+        currencyHtml = '<span class="dep-card__currency">' + symbol + '</span>';
+      }
+
+      // 套餐标签
+      var planHtml = '';
+      if (tokenData && tokenData.plan) {
+        planHtml = '<span class="dep-card__plan-tag">' + escapeHtml(tokenData.plan) + '</span>';
+      }
+
+      // 刷新倒计时
+      var resetHtml = '';
+      if (tokenData && tokenData.resetAt) {
+        var resetTime = new Date(tokenData.resetAt);
+        var now = new Date();
+        if (resetTime > now) {
+          var diffMs = resetTime - now;
+          var diffH = Math.floor(diffMs / 3600000);
+          var diffM = Math.floor((diffMs % 3600000) / 60000);
+          var countdown = diffH > 0 ? diffH + 'h' + diffM + 'm' : diffM + 'm';
+          resetHtml = '<span class="dep-card__reset-countdown">刷新于 ' + countdown + '</span>';
+        }
+      }
 
       return (
         '<div class="dep-card" draggable="true" data-id="' + d.id + '" data-order="' + d.order + '">' +
@@ -236,8 +282,10 @@
           '</div>' +
           '<div class="dep-card__progress">' +
             '<div class="dep-card__progress-header">' +
-              '<span class="dep-card__progress-label">余额</span>' +
-              '<span class="dep-card__progress-value" style="color:' + percentColor + '">' + balanceText + '</span>' +
+              '<span class="dep-card__progress-label">余额' + planHtml + '</span>' +
+              '<span class="dep-card__progress-value" style="color:' + percentColor + '">' +
+                currencyHtml + balanceText + resetHtml +
+              '</span>' +
             '</div>' +
             '<div class="dep-card__bar-wrap">' +
               '<div class="dep-card__bar ' + barClass + '" style="width:' + percent + '%"></div>' +
@@ -379,6 +427,16 @@
     // 重新渲染
     renderDeployments();
 
+    // 落地回弹动画 — 找到被拖动的卡片
+    var settledCard = dom.deploymentList.querySelector('.dep-card[data-id="' + draggedId + '"]');
+    if (settledCard) {
+      settledCard.classList.add('is-settling');
+      settledCard.addEventListener('animationend', function handler() {
+        settledCard.classList.remove('is-settling');
+        settledCard.removeEventListener('animationend', handler);
+      });
+    }
+
     // 批量调用 API 更新 order
     if (updates.length > 0) {
       var promises = updates.map(function (u) {
@@ -396,11 +454,63 @@
   }
 
   // ==========================================================================
-  // 渲染：Skill 列表
+  // Skill 库：维度定义（前端展示用，与 skill-scorer DIMENSIONS 对齐）
+  // ==========================================================================
+
+  var SKILL_DIMENSIONS = [
+    { key: 'frontmatter',         label: '元数据完整性' },
+    { key: 'workflow',            label: '工作流清晰度' },
+    { key: 'failureModes',        label: '失败场景覆盖' },
+    { key: 'checkpoints',         label: '检查点/暂停点' },
+    { key: 'specificity',         label: '指令具体性' },
+    { key: 'resourceIntegration', label: '资源整合' },
+    { key: 'architecture',        label: '架构质量' },
+    { key: 'testPerformance',     label: '实测效果' },
+    { key: 'antiPatterns',        label: '反模式规避' },
+  ];
+
+  var SKILL_STATUS_META = {
+    new:      { emoji: '🆕', label: '新建' },
+    installed:{ emoji: '✅', label: '已安装' },
+    skipped:  { emoji: '⏭', label: '已跳过' },
+    evolved:  { emoji: '🧬', label: '已进化' },
+  };
+
+  // ==========================================================================
+  // Skill 库：数据加载
+  // ==========================================================================
+
+  function loadSkills() {
+    var params = [];
+    if (skillFilter.q) params.push('q=' + encodeURIComponent(skillFilter.q));
+    if (skillFilter.category) params.push('category=' + encodeURIComponent(skillFilter.category));
+    var query = params.length > 0 ? '?' + params.join('&') : '';
+
+    return api('/skills' + query)
+      .then(function (data) {
+        skills = data.skills || [];
+        renderSkillCards();
+      })
+      .catch(function (err) {
+        showToast('❌ 加载 skill 失败: ' + err.message);
+      });
+  }
+
+  function loadSkillStats() {
+    return api('/skills/stats')
+      .then(function (data) {
+        skillStats = data;
+        renderSkillStatsBar();
+        renderSkillFilters();
+      })
+      .catch(function () { /* ignore */ });
+  }
+
+  // ==========================================================================
+  // Skill 库：渲染
   // ==========================================================================
 
   function renderSkills() {
-    // 目前 skill 库没有后端 API，显示占位
     var autoHunt = config.skillHunter && config.skillHunter.autoHunt;
     dom.autoHuntToggle.checked = !!autoHunt;
 
@@ -419,13 +529,311 @@
         });
     };
 
-    // 显示占位 skill 卡片（示例数据，后续对接真实 API）
-    dom.skillList.innerHTML =
-      '<div class="skill-placeholder">' +
-        '<span class="skill-placeholder__emoji">🔍</span>' +
-        '<div>Skill 猎手正在搜寻中...</div>' +
-        '<div style="font-size:12px;margin-top:4px;color:var(--text-dim)">关注 claude-code skill / mcp 生态</div>' +
+    // 绑定手动搜集按钮
+    dom.skillHuntBtn.onclick = function () {
+      var btn = dom.skillHuntBtn;
+      btn.classList.add('is-loading');
+      btn.textContent = '🔍 搜集中...';
+      api('/skills/hunt', { method: 'POST' })
+        .then(function (result) {
+          var count = (result && result.discovered) || 0;
+          showToast('✅ 搜集完成，发现 ' + count + ' 个新 skill');
+          loadSkillStats();
+          loadSkills();
+        })
+        .catch(function (err) {
+          showToast('❌ 搜集失败: ' + err.message);
+        })
+        .finally(function () {
+          btn.classList.remove('is-loading');
+          btn.textContent = '🔍 手动搜集';
+        });
+    };
+
+    // 绑定搜索输入（防抖）
+    dom.skillSearch.value = skillFilter.q;
+    dom.skillSearch.oninput = function () {
+      clearTimeout(skillSearchTimer);
+      var val = this.value.trim();
+      skillSearchTimer = setTimeout(function () {
+        skillFilter.q = val;
+        loadSkills();
+      }, 300);
+    };
+
+    // 加载数据
+    loadSkillStats();
+    loadSkills();
+  }
+
+  // 统计条
+  function renderSkillStatsBar() {
+    var total = skillStats.total || 0;
+    var byStatus = skillStats.byStatus || {};
+    var installed = byStatus.installed || 0;
+    var evaluated = 0;
+    // 统计已评估的 skill（通过 loadSkills 的数据推算，stats API 没有这个字段）
+    // 用 local skills 数据来补
+    skills.forEach(function (s) { if (s.score != null) evaluated++; });
+
+    dom.skillStats.innerHTML =
+      '<span class="skill-stats__item">📦 总计 <span class="skill-stats__value">' + total + '</span></span>' +
+      '<span class="skill-stats__item">✅ 已安装 <span class="skill-stats__value">' + installed + '</span></span>' +
+      '<span class="skill-stats__item">🆕 新发现 <span class="skill-stats__value">' + (byStatus.new || 0) + '</span></span>';
+  }
+
+  // 分类筛选按钮
+  function renderSkillFilters() {
+    var byCategory = skillStats.byCategory || {};
+    var categories = Object.keys(byCategory).sort();
+    if (categories.length === 0) {
+      dom.skillFilters.innerHTML = '';
+      return;
+    }
+
+    // "全部" 按钮
+    var html = '<button class="skill-filters__btn' + (skillFilter.category === '' ? ' is-active' : '') + '" data-cat="">全部</button>';
+    categories.forEach(function (cat) {
+      var isActive = skillFilter.category === cat;
+      html += '<button class="skill-filters__btn' + (isActive ? ' is-active' : '') + '" data-cat="' + escapeHtml(cat) + '">' +
+        escapeHtml(cat) + ' <span style="opacity:0.6">(' + byCategory[cat] + ')</span></button>';
+    });
+    dom.skillFilters.innerHTML = html;
+
+    // 绑定点击
+    dom.skillFilters.querySelectorAll('.skill-filters__btn').forEach(function (btn) {
+      btn.onclick = function () {
+        skillFilter.category = this.dataset.cat || '';
+        loadSkills();
+      };
+    });
+  }
+
+  // Skill 卡片列表
+  function renderSkillCards() {
+    if (skills.length === 0) {
+      dom.skillList.innerHTML =
+        '<div class="skill-placeholder">' +
+          '<span class="skill-placeholder__emoji">🔍</span>' +
+          '<div>Skill 猎手正在搜寻中...</div>' +
+          '<div style="font-size:12px;margin-top:4px;color:var(--text-dim)">关注 claude-code skill / mcp 生态</div>' +
+        '</div>';
+      return;
+    }
+
+    dom.skillList.innerHTML = skills.map(function (s) {
+      return renderSkillCard(s);
+    }).join('');
+
+    // 更新统计条中的已评估数
+    renderSkillStatsBar();
+  }
+
+  function scoreLevel(score) {
+    if (score >= 70) return 'high';
+    if (score >= 40) return 'mid';
+    return 'low';
+  }
+
+  function renderSkillCard(skill) {
+    var statusMeta = SKILL_STATUS_META[skill.status] || SKILL_STATUS_META.new;
+    var catTag = skill.category
+      ? '<span class="skill-card__tag">' + escapeHtml(skill.category) + '</span>'
+      : '';
+    var tags = (skill.tags || []).map(function (t) {
+      return '<span class="skill-card__tag">' + escapeHtml(t) + '</span>';
+    }).join('');
+
+    // 分数条
+    var scoreHtml = '';
+    if (skill.score != null) {
+      var level = scoreLevel(skill.score);
+      scoreHtml =
+        '<div class="skill-card__score-wrap">' +
+          '<div class="skill-card__score-bar"><div class="skill-card__score-fill skill-card__score-fill--' + level + '" style="width:' + skill.score + '%"></div></div>' +
+          '<span class="skill-card__score-num skill-card__score-num--' + level + '">' + skill.score + '</span>' +
+        '</div>';
+    }
+
+    // 操作按钮（阻止冒泡避免触发展开）
+    var actionsHtml =
+      '<div class="skill-card__actions">' +
+        '<button class="btn btn--evaluate" data-action="evaluate" data-id="' + escapeHtml(skill.id) + '">🔍 评估</button>' +
+        '<button class="btn btn--install" data-action="install" data-id="' + escapeHtml(skill.id) + '">📥 安装</button>' +
+        '<button class="btn btn--delete" data-action="delete" data-id="' + escapeHtml(skill.id) + '">🗑 删除</button>' +
       '</div>';
+
+    return (
+      '<div class="skill-card" data-id="' + escapeHtml(skill.id) + '">' +
+        '<div class="skill-card__header">' +
+          '<div class="skill-card__title-area">' +
+            '<span class="skill-card__name">' + escapeHtml(skill.name) + '</span>' +
+            '<span class="skill-card__description">' + escapeHtml(skill.description || '') + '</span>' +
+          '</div>' +
+          '<span class="skill-card__status skill-card__status--' + escapeHtml(skill.status) + '">' +
+            statusMeta.emoji + ' ' + statusMeta.label +
+          '</span>' +
+        '</div>' +
+        (catTag || tags ? '<div class="skill-card__tags">' + catTag + tags + '</div>' : '') +
+        scoreHtml +
+        actionsHtml +
+        '<div class="skill-card__breakdown" id="breakdown-' + escapeHtml(skill.id) + '"></div>' +
+      '</div>'
+    );
+  }
+
+  // 展开/收起分数维度详情
+  function toggleSkillBreakdown(skillId) {
+    var container = document.getElementById('breakdown-' + skillId);
+    if (!container) return;
+
+    // 如果已展开则收起
+    if (container.classList.contains('is-visible')) {
+      container.classList.remove('is-visible');
+      return;
+    }
+
+    // 先查本地缓存
+    var skill = skills.find(function (s) { return s.id === skillId; });
+    if (skill && skill.scoreBreakdown && Object.keys(skill.scoreBreakdown).length > 0) {
+      renderBreakdown(container, skill.scoreBreakdown);
+      container.classList.add('is-visible');
+      return;
+    }
+
+    // 否则从 API 获取详情
+    container.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:4px 0;">加载中...</div>';
+    container.classList.add('is-visible');
+
+    api('/skills/' + skillId)
+      .then(function (detail) {
+        // 回填到本地缓存
+        if (skill) {
+          skill.scoreBreakdown = detail.scoreBreakdown || {};
+          skill.content = detail.content;
+        }
+        if (detail.scoreBreakdown && Object.keys(detail.scoreBreakdown).length > 0) {
+          renderBreakdown(container, detail.scoreBreakdown);
+        } else {
+          container.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:4px 0;">暂无评估数据，请先评估此 skill</div>';
+        }
+      })
+      .catch(function (err) {
+        container.innerHTML = '<div style="font-size:12px;color:var(--accent-red);padding:4px 0;">加载失败: ' + escapeHtml(err.message) + '</div>';
+      });
+  }
+
+  function renderBreakdown(container, breakdown) {
+    var rows = SKILL_DIMENSIONS.map(function (dim) {
+      var entry = breakdown[dim.key];
+      if (!entry) return '';
+      var score = entry.score || 0;
+      var max = entry.max || 1;
+      var pct = Math.round((score / max) * 100);
+      var level = scoreLevel(pct);
+      return (
+        '<div class="skill-card__breakdown-row">' +
+          '<span class="skill-card__breakdown-label">' + dim.label + '</span>' +
+          '<div class="skill-card__breakdown-bar"><div class="skill-card__breakdown-fill skill-card__breakdown-fill--' + level + '" style="width:' + pct + '%"></div></div>' +
+          '<span class="skill-card__breakdown-score skill-card__breakdown-score--' + level + '">' + score + '/' + max + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    container.innerHTML =
+      '<div class="skill-card__breakdown-title">📊 维度评分</div>' +
+      rows;
+  }
+
+  // ==========================================================================
+  // Skill 库：事件委托（卡片点击 + 操作按钮）
+  // ==========================================================================
+
+  dom.skillList.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (btn) {
+      e.stopPropagation();
+      var action = btn.dataset.action;
+      var id = btn.dataset.id;
+      if (action === 'evaluate') handleSkillEvaluate(id, btn);
+      else if (action === 'install') handleSkillInstall(id, btn);
+      else if (action === 'delete') handleSkillDelete(id, btn);
+      return;
+    }
+
+    // 点击卡片展开/收起
+    var card = e.target.closest('.skill-card');
+    if (card) {
+      toggleSkillBreakdown(card.dataset.id);
+    }
+  });
+
+  function handleSkillEvaluate(id, btn) {
+    btn.classList.add('is-loading');
+    btn.textContent = '🔍 评估中...';
+    api('/skills/' + id + '/evaluate', { method: 'POST' })
+      .then(function (result) {
+        showToast('✅ 评估完成: ' + (result.score || '--') + ' 分');
+        // 更新本地数据
+        var skill = skills.find(function (s) { return s.id === id; });
+        if (skill && result) {
+          skill.score = result.score;
+          skill.scoreBreakdown = result.breakdown || {};
+        }
+        renderSkillCards();
+        renderSkillStatsBar();
+      })
+      .catch(function (err) {
+        showToast('❌ 评估失败: ' + err.message);
+      })
+      .finally(function () {
+        btn.classList.remove('is-loading');
+        btn.textContent = '🔍 评估';
+      });
+  }
+
+  function handleSkillInstall(id, btn) {
+    btn.classList.add('is-loading');
+    btn.textContent = '📥 安装中...';
+    api('/skills/' + id + '/install', { method: 'POST' })
+      .then(function (result) {
+        showToast('✅ 已安装: ' + (result.installPath || ''));
+        var skill = skills.find(function (s) { return s.id === id; });
+        if (skill) {
+          skill.status = 'installed';
+          skill.installedAt = result.installedAt || Date.now();
+          skill.installPath = result.installPath || null;
+        }
+        renderSkillCards();
+        renderSkillStatsBar();
+      })
+      .catch(function (err) {
+        showToast('❌ 安装失败: ' + err.message);
+      })
+      .finally(function () {
+        btn.classList.remove('is-loading');
+        btn.textContent = '📥 安装';
+      });
+  }
+
+  function handleSkillDelete(id, btn) {
+    if (!confirm('确定删除此 skill？')) return;
+    btn.classList.add('is-loading');
+    btn.textContent = '🗑 删除中...';
+    api('/skills/' + id, { method: 'DELETE' })
+      .then(function () {
+        showToast('🗑 已删除');
+        skills = skills.filter(function (s) { return s.id !== id; });
+        renderSkillCards();
+        loadSkillStats();
+      })
+      .catch(function (err) {
+        showToast('❌ 删除失败: ' + err.message);
+      })
+      .finally(function () {
+        btn.classList.remove('is-loading');
+        btn.textContent = '🗑 删除';
+      });
   }
 
   // ==========================================================================
@@ -659,6 +1067,56 @@
       showToast('🗑 请求历史已清空');
     });
 
+    // Skill 库 SSE 事件
+    sse.addEventListener('skill.discovered', function (e) {
+      try {
+        var skill = JSON.parse(e.data);
+        // 检查是否已存在
+        var exists = skills.some(function (s) { return s.id === skill.id; });
+        if (!exists) {
+          skills.unshift(skill);
+          renderSkillCards();
+          renderSkillStatsBar();
+          showToast('🆕 新 skill: ' + (skill.name || skill.id));
+        }
+      } catch (err) { /* ignore */ }
+    });
+
+    sse.addEventListener('skill.evaluated', function (e) {
+      try {
+        var data = JSON.parse(e.data);
+        var skill = skills.find(function (s) { return s.id === data.id; });
+        if (skill) {
+          skill.score = data.score;
+          skill.scoreBreakdown = data.breakdown || skill.scoreBreakdown;
+        }
+        renderSkillCards();
+      } catch (err) { /* ignore */ }
+    });
+
+    sse.addEventListener('skill.installed', function (e) {
+      try {
+        var data = JSON.parse(e.data);
+        var skill = skills.find(function (s) { return s.id === data.id; });
+        if (skill) {
+          skill.status = 'installed';
+          skill.installedAt = data.installedAt || Date.now();
+          skill.installPath = data.installPath || null;
+        }
+        renderSkillCards();
+        renderSkillStatsBar();
+      } catch (err) { /* ignore */ }
+    });
+
+    sse.addEventListener('skill.evolved', function (e) {
+      try {
+        var data = JSON.parse(e.data);
+        // 进化可能产生新 skill，重新加载整个列表
+        loadSkills();
+        loadSkillStats();
+      } catch (err) { /* ignore */ }
+    });
+
     sse.onerror = function () {
       updateConnectionStatus('disconnected');
       sse.close();
@@ -668,6 +1126,8 @@
       reconnectTimer = setTimeout(function () {
         loadDeployments();
         loadRequests();
+        loadSkillStats();
+        loadSkills();
         connectSSE();
       }, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
