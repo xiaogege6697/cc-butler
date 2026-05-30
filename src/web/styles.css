@@ -440,19 +440,19 @@ body::before {
 }
 
 /* =========================================================================
-   Deployment 紧凑卡片 — 磨砂质感
+   Deployment 路由卡片 — 整合 Token 消耗
    ========================================================================= */
 .dep-card {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: 12px;
+  padding: 12px 16px;
   background: var(--bg-card);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
   cursor: grab;
   transition: box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
@@ -497,7 +497,7 @@ body::before {
   background: rgba(212, 160, 74, 0.04);
   box-shadow: none;
   opacity: 0.6;
-  min-height: 40px;
+  min-height: 60px;
   animation: placeholder-pulse 1.6s ease-in-out infinite;
 }
 
@@ -505,7 +505,6 @@ body::before {
 .dep-card--staging {
   opacity: 0.5;
   filter: grayscale(0.3);
-  cursor: grab;
 }
 
 .dep-card--staging:hover {
@@ -513,7 +512,15 @@ body::before {
   filter: none;
 }
 
-/* 卡片内部 — 紧凑横向布局 */
+/* 卡片布局：左侧信息 + 右侧消耗条 */
+.dep-card__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
 .dep-card__health-dot {
   width: 8px;
   height: 8px;
@@ -521,25 +528,16 @@ body::before {
   flex-shrink: 0;
 }
 
-.dep-card__health-dot--healthy {
-  background: var(--accent-green);
-}
-
-.dep-card__health-dot--unhealthy {
-  background: var(--accent-red);
-}
-
-.dep-card__health-dot--disabled {
-  background: var(--text-dim);
-}
+.dep-card__health-dot--healthy { background: var(--accent-green); }
+.dep-card__health-dot--unhealthy { background: var(--accent-red); }
+.dep-card__health-dot--disabled { background: var(--text-dim); }
 
 .dep-card__title-area {
   min-width: 0;
-  flex: 1;
 }
 
 .dep-card__name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -558,54 +556,49 @@ body::before {
   text-overflow: ellipsis;
 }
 
-/* 消耗进度条 — 紧凑 */
-.dep-card__progress {
+/* 右侧消耗区 — 水平布局 */
+.dep-card__consumption {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 140px;
-  flex-shrink: 0;
+  gap: 10px;
+  flex: 1;
+  min-width: 160px;
 }
 
 .dep-card__bar-wrap {
   flex: 1;
-  height: 6px;
+  height: 8px;
   background: var(--bg-input);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .dep-card__bar {
   height: 100%;
-  border-radius: 3px;
+  border-radius: 4px;
   transition: width 0.6s ease;
   min-width: 2%;
 }
 
-.dep-card__bar--green {
-  background: linear-gradient(90deg, #6abf7b, #4a8c5c);
-}
+.dep-card__bar--green { background: linear-gradient(90deg, #6abf7b, #4a8c5c); }
+.dep-card__bar--yellow { background: linear-gradient(90deg, #d4a04a, #c07030); }
+.dep-card__bar--red { background: linear-gradient(90deg, #c04040, #d06060); }
+.dep-card__bar--gray { background: linear-gradient(90deg, #c8c0b0, #b0a898); }
 
-.dep-card__bar--yellow {
-  background: linear-gradient(90deg, #d4a04a, #c07030);
-}
-
-.dep-card__bar--red {
-  background: linear-gradient(90deg, #c04040, #d06060);
-}
-
-.dep-card__bar--gray {
-  background: linear-gradient(90deg, #c8c0b0, #b0a898);
-}
-
-.dep-card__progress-text {
-  font-size: 11px;
+.dep-card__consumption-text {
+  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
-  min-width: 36px;
+  min-width: 70px;
   text-align: right;
   white-space: nowrap;
+}
+
+.dep-card__consumption-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 400;
 }
 
 /* 优先级标签 */
@@ -632,9 +625,7 @@ body::before {
   opacity: 0.4;
 }
 
-.dep-card:hover .dep-card__drag-handle {
-  opacity: 0.8;
-}
+.dep-card:hover .dep-card__drag-handle { opacity: 0.8; }
 
 .dep-card__drag-handle:hover {
   opacity: 1 !important;

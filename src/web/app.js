@@ -163,67 +163,7 @@
   // ==========================================================================
 
   function renderProgress() {
-    if (deployments.length === 0) {
-      dom.progressGrid.innerHTML = '<div class="empty-state"><span class="empty-state__emoji">📭</span>暂无 deployment</div>';
-      return;
-    }
-
-    dom.progressGrid.innerHTML = deployments.map(function (d) {
-      var tokenData = tokenStatus[d.id];
-
-      // 消耗百分比（percentage 是已用占比）
-      var percent = 0;
-      var barClass = 'progress-card__bar--gray';
-      var consumedText = '暂无数据';
-
-      if (tokenData && tokenData.percentage != null) {
-        percent = Math.round(tokenData.percentage);
-        consumedText = (tokenData.usedQuota != null ? tokenData.usedQuota.toFixed(1) : '--') +
-          ' / ' + (tokenData.totalQuota != null ? tokenData.totalQuota.toFixed(1) : '--');
-        if (percent < 50) barClass = 'progress-card__bar--green';
-        else if (percent < 80) barClass = 'progress-card__bar--yellow';
-        else barClass = 'progress-card__bar--red';
-      }
-
-      // 货币符号
-      var currency = '';
-      if (tokenData && tokenData.currency) {
-        if (tokenData.currency === 'CNY' || tokenData.currency === 'cny') currency = '¥';
-        else if (tokenData.currency === 'USD' || tokenData.currency === 'usd') currency = '$';
-      }
-
-      // 健康状态
-      var dotColor = 'var(--accent-green)';
-      if (!d.enabled) dotColor = 'var(--text-dim)';
-      else if (d.health && !d.health.isHealthy) dotColor = 'var(--accent-red)';
-
-      // 消耗百分比颜色
-      var pctColor = barClass.includes('green') ? 'var(--accent-green)'
-        : barClass.includes('yellow') ? 'var(--accent-yellow)' : 'var(--accent-red)';
-      if (barClass.includes('gray')) pctColor = 'var(--text-dim)';
-
-      return (
-        '<div class="card progress-card">' +
-          '<div class="progress-card__header">' +
-            '<span class="progress-card__name" style="gap:8px">' +
-              '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + dotColor + '"></span>' +
-              escapeHtml(d.name) +
-            '</span>' +
-            '<span class="progress-card__percent" style="color:' + pctColor + '">' +
-              percent + '%' +
-            '</span>' +
-          '</div>' +
-          '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);margin-bottom:2px">' +
-            '<span>消耗</span>' +
-            '<span>' + currency + consumedText + '</span>' +
-          '</div>' +
-          '<div class="progress-card__bar-wrap">' +
-            '<div class="progress-card__bar ' + barClass + '" style="width:' + Math.max(2, percent) + '%"></div>' +
-          '</div>' +
-        '</div>'
-      );
-    }).join('');
-
+    // Token 消耗已整合到路由卡片中，这里只更新时间戳
     dom.tokenUpdateTime.textContent = '刚刚更新 ↻';
   }
 
@@ -231,22 +171,28 @@
   // 渲染：Deployment 双区卡片
   // ==========================================================================
 
-  // 生成单个紧凑卡片 HTML
+  // 生成单个路由卡片 HTML（整合 Token 消耗）
   function buildDepCard(d, isStaging) {
-    // 健康状态点
     var dotClass = 'dep-card__health-dot--healthy';
     if (!d.enabled) dotClass = 'dep-card__health-dot--disabled';
     else if (d.health && !d.health.isHealthy) dotClass = 'dep-card__health-dot--unhealthy';
 
-    // 消耗进度条
+    // Token 消耗数据
     var tokenData = tokenStatus[d.id];
     var percent = 0;
     var barClass = 'dep-card__bar--gray';
-    var pctText = '--';
+    var consumedText = '暂无数据';
 
     if (tokenData && tokenData.percentage != null) {
       percent = Math.round(tokenData.percentage);
-      pctText = percent + '%';
+      var currency = '';
+      if (tokenData.currency) {
+        if (tokenData.currency === 'CNY' || tokenData.currency === 'cny') currency = '¥';
+        else if (tokenData.currency === 'USD' || tokenData.currency === 'usd') currency = '$';
+      }
+      var used = tokenData.usedQuota != null ? tokenData.usedQuota.toFixed(1) : '--';
+      var total = tokenData.totalQuota != null ? tokenData.totalQuota.toFixed(1) : '--';
+      consumedText = currency + used + ' / ' + total + '  <span class="dep-card__consumption-label">' + percent + '%</span>';
       if (percent >= 80) barClass = 'dep-card__bar--red';
       else if (percent >= 50) barClass = 'dep-card__bar--yellow';
       else barClass = 'dep-card__bar--green';
@@ -258,16 +204,18 @@
     return (
       '<div class="dep-card' + stagingClass + '" draggable="true" data-id="' + d.id + '" data-order="' + d.order + '" data-enabled="' + d.enabled + '">' +
         '<span class="dep-card__drag-handle" title="拖拽">⠿</span>' +
-        '<span class="dep-card__health-dot ' + dotClass + '"></span>' +
-        '<div class="dep-card__title-area">' +
-          '<div class="dep-card__name">' + escapeHtml(d.name) + '</div>' +
-          '<div class="dep-card__model">' + escapeHtml(d.model || d.baseUrl || '--') + '</div>' +
+        '<div class="dep-card__left">' +
+          '<span class="dep-card__health-dot ' + dotClass + '"></span>' +
+          '<div class="dep-card__title-area">' +
+            '<div class="dep-card__name">' + escapeHtml(d.name) + '</div>' +
+            '<div class="dep-card__model">' + escapeHtml(d.model || d.baseUrl || '--') + '</div>' +
+          '</div>' +
         '</div>' +
-        '<div class="dep-card__progress">' +
+        '<div class="dep-card__consumption">' +
           '<div class="dep-card__bar-wrap">' +
             '<div class="dep-card__bar ' + barClass + '" style="width:' + Math.max(2, percent) + '%"></div>' +
           '</div>' +
-          '<span class="dep-card__progress-text">' + pctText + '</span>' +
+          '<span class="dep-card__consumption-text">' + consumedText + '</span>' +
         '</div>' +
         orderHtml +
       '</div>'
