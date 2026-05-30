@@ -228,6 +228,23 @@ body::before {
   color: var(--text-dim);
 }
 
+.section__meta--btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.section__meta--btn:hover {
+  color: var(--accent-yellow);
+  border-color: var(--accent-yellow);
+  background: rgba(212, 160, 74, 0.06);
+}
+
 .section__controls {
   display: flex;
   align-items: center;
