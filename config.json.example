@@ -1,0 +1,44 @@
+{
+  "_comment": "cc-butler 配置模板 — 复制为 config.json 后填入真实值。apiKey 支持直接填字符串或 'env:VAR_NAME' 格式读取环境变量。deployments 可配多个，按 order 排序。",
+  "_comment_deployment": "每个 deployment 代表一个 API 服务商。model 格式为 'provider/model-name'。scanIntervalMinutes 可选，默认 10 分钟。",
+  "_comment_router": "strategy: priority-weighted 按 order+weight 路由。numRetries: 失败后重试次数。timeout: 单次请求超时(ms)。",
+  "_comment_budget": "dailyTokenLimit: 每日 token 上限，null 表示不限制。alertThreshold: 触发告警的用量百分比。",
+  "_comment_skillHunter": "autoHunt: 是否自动搜索社区 skill。intervalHours: 搜索间隔。sources/keywords: 搜索来源和关键词。",
+  "deployments": [
+    {
+      "id": "my-provider-1",
+      "name": "我的服务商 1",
+      "baseUrl": "https://your-provider.com/anthropic",
+      "apiKey": "",
+      "model": "anthropic/your-model",
+      "order": 1,
+      "weight": 50,
+      "enabled": true,
+      "healthCheck": {
+        "allowedFails": 3,
+        "cooldownTime": 60
+      },
+      "scanIntervalMinutes": 10
+    }
+  ],
+  "router": {
+    "strategy": "priority-weighted",
+    "numRetries": 2,
+    "timeout": 300000
+  },
+  "modelAliases": {},
+  "budget": {
+    "dailyTokenLimit": null,
+    "alertThreshold": 0.8
+  },
+  "tokenScanner": {
+    "enabled": true
+  },
+  "skillHunter": {
+    "autoHunt": true,
+    "intervalHours": 24,
+    "sources": ["github"],
+    "keywords": ["claude-code skill", "claude-code mcp", "claude skill", "SKILL.md"]
+  },
+  "activeDeploymentId": null
+}

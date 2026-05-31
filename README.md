@@ -4,6 +4,9 @@
 
 轻量级 Node.js 代理，替代 Python litellm + PostgreSQL。单进程、零外部数据库、漫画风 Dashboard。
 
+<!-- TODO: 添加 Dashboard 截图 -->
+<!-- ![Dashboard](docs/screenshot-dashboard.png) -->
+
 ## ✨ 特性
 
 ### 🔀 智能路由
@@ -32,6 +35,11 @@
 
 ## 🚀 快速开始
 
+### 前置条件
+
+- Node.js >= 20.0.0（需要原生 fetch + ReadableStream）
+- npm 或 yarn
+
 ```bash
 # 克隆
 git clone https://github.com/xiaogege6697/cc-butler.git
@@ -40,8 +48,8 @@ cd cc-butler
 # 安装（仅 express 一个依赖）
 npm install
 
-# 配置 deployment
-cp data/config.json data/config.json.bak
+# 创建配置文件（从模板复制）
+cp config.json.example data/config.json
 # 编辑 data/config.json，填入你的 API key
 
 # 启动
@@ -109,6 +117,35 @@ src/
 - **零前端构建** — 纯 vanilla HTML/CSS/JS
 - **零外部数据库** — 全部 JSON 文件持久化
 
+## 🐳 Docker 部署
+
+```bash
+docker-compose up -d
+```
+
+data/ 目录会挂载为 volume，配置和缓存数据持久化。
+
+## 🖥️ macOS 服务
+
+```bash
+# 注册为 LaunchAgent（开机自启）
+npm run enable:mac-service
+
+# 卸载
+npm run disable:mac-service
+```
+
+## ❓ Troubleshooting
+
+**Q: 启动报错 `EADDRINUSE`**
+A: 端口 8118 被占用，用 `PORT=8119 npm start` 换端口，或 `lsof -i :8118` 查看占用进程。
+
+**Q: Token 余额显示 `no-adapter`**
+A: 确认 deployment 的 baseUrl 格式正确，且已安装对应 provider 的 adapter。
+
+**Q: Skill 进化失败**
+A: 确认 cc-butler 正在运行（进化通过 localhost:8118 调用），检查日志中的错误信息。
+
 ## 📄 License
 
-MIT
+[MIT](LICENSE)

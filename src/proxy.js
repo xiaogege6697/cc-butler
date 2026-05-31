@@ -83,6 +83,7 @@ function extractTokensFromSSELine(line) {
 
     return null;
   } catch {
+    console.debug('[proxy] SSE token 提取失败');
     return null;
   }
 }
@@ -104,6 +105,7 @@ function extractTokensFromJSON(body) {
       cacheCreationTokens: u.cache_creation_input_tokens ?? null,
     };
   } catch {
+    console.debug('[proxy] JSON token 提取失败');
     return null;
   }
 }
@@ -165,7 +167,7 @@ async function pipeSSE(reader, res, onChunk) {
   const idleChecker = setInterval(() => {
     if (Date.now() - lastChunkTime > TIMEOUT_STREAM_IDLE) {
       // 空闲超时，中断流
-      try { reader.cancel(); } catch { /* ignore */ }
+      try { reader.cancel(); } catch { /* reader 已关闭，忽略 */ }
     }
   }, 5000);
 
@@ -366,7 +368,7 @@ function createProxy(config, routerEngine, healthChecker) {
         let errBody = null;
         try {
           errBody = await upstreamRes.text();
-        } catch { /* ignore */ }
+        } catch { console.debug('[proxy] 上游错误响应体读取失败'); }
 
         const errMsg = `上游返回 ${upstreamRes.status}`;
         if (healthChecker) healthChecker.reportFailure(deployment.id, errMsg);
@@ -508,7 +510,7 @@ function createProxy(config, routerEngine, healthChecker) {
         try {
           const buf = await upstreamRes.arrayBuffer();
           resBody = Buffer.from(buf);
-        } catch { /* ignore */ }
+        } catch { console.debug('[proxy] 非 SSE 响应体读取失败'); }
 
         // 设置 content-length（如果有的话，让客户端知道长度）
         if (resBody) {

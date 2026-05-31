@@ -97,7 +97,7 @@ async function fetchSkillContent(sourceUrl) {
           if (text && text.length > 50) return text;
         }
       } catch {
-        // 忽略，尝试下一个
+        console.debug('[skill-scorer] 内容获取失败:', source);
       }
     }
   }
@@ -107,7 +107,7 @@ async function fetchSkillContent(sourceUrl) {
     const res = await fetch(rawUrl, { signal: AbortSignal.timeout(10000) });
     if (res.ok) return await res.text();
   } catch {
-    // 忽略
+    console.debug('[skill-scorer] 非 GitHub URL 获取失败');
   }
 
   return null;
@@ -496,7 +496,7 @@ function createSkillScorer(skillStore, bus) {
           skillStore.update(skillId, { content });
         }
       } catch {
-        // 获取失败不影响评估
+        console.debug('[skill-scorer] 内容回填失败');
       }
     }
 

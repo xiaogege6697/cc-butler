@@ -14,6 +14,17 @@ const { createSkillHunter } = require('./skill-hunter');
 const { createSkillEvaluator } = require('./skill-evaluator');
 
 // ---------------------------------------------------------------------------
+// 全局错误处理
+// ---------------------------------------------------------------------------
+process.on('uncaughtException', (err) => {
+  console.error('[cc-butler] 未捕获异常:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[cc-butler] 未处理的 Promise 拒绝:', reason);
+});
+
+// ---------------------------------------------------------------------------
 // 初始化配置
 // ---------------------------------------------------------------------------
 config.load();
@@ -84,5 +95,18 @@ app.listen(PORT, () => {
   console.log(`[cc-butler] 代理地址 → http://localhost:${PORT}/v1`);
   console.log(`[cc-butler] 管理面板 → http://localhost:${PORT}/admin`);
 });
+
+// ---------------------------------------------------------------------------
+// 优雅关闭
+// ---------------------------------------------------------------------------
+function gracefulShutdown(signal) {
+  console.log(`[cc-butler] 收到 ${signal}，正在关闭...`);
+  tokenScanner.stop();
+  skillHunter.stopAutoHunt();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 module.exports = app;

@@ -329,7 +329,7 @@ function createSkillStore(bus) {
       try {
         fs.renameSync(cp, dest);
       } catch {
-        // 跨设备 rename 失败时回退到 copy+unlink
+        /* 跨设备 rename 失败，回退到 copy+unlink */
         fs.copyFileSync(cp, dest);
         fs.unlinkSync(cp);
       }
@@ -364,7 +364,7 @@ function createSkillStore(bus) {
             fs.copyFileSync(cp, dest);
             fs.unlinkSync(cp);
           } catch {
-            // 忽略单个文件失败
+            console.warn('[skill-store] 清理缓存文件失败:', cp);
           }
         }
       }

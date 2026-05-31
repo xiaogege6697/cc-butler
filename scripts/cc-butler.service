@@ -1,0 +1,16 @@
+[Unit]
+Description=cc-butler - Claude Code 智能管家
+After=network.target
+
+[Service]
+Type=simple
+User=cc-butler
+WorkingDirectory=/opt/cc-butler
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=8118
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  cc-butler:
+    build: .
+    ports:
+      - "8118:8118"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped

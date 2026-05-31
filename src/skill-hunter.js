@@ -230,6 +230,7 @@ async function checkSkillMd(fullName) {
     const data = await fetchJSON(url);
     return !!(data && data.name === 'SKILL.md');
   } catch {
+    console.debug('[skill-hunter] SKILL.md 检测失败:', url);
     return false;
   }
 }
@@ -275,6 +276,7 @@ function readCache(url) {
     try { fs.unlinkSync(filePath); } catch { /* 忽略删除失败 */ }
     return null;
   } catch {
+    console.debug('[skill-hunter] 磁盘缓存读取失败');
     return null;
   }
 }

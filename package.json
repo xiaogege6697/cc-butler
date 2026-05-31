@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js",
     "enable:mac-service": "node scripts/enable-mac-service.mjs",
     "disable:mac-service": "node scripts/disable-mac-service.mjs"
   },

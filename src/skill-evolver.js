@@ -115,6 +115,7 @@ function createSkillEvolver(skillStore, bus, scorer) {
         const result = await scorer.evaluate(skill.id);
         evaluations.push(result);
       } catch {
+        console.warn('[skill-evolver] Skill 评估失败，使用零分:', skill.id);
         evaluations.push({ id: skill.id, name: skill.name, totalScore: 0 });
       }
     }

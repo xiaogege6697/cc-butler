@@ -3,3 +3,35 @@ data/
 *.log
 .DS_Store
 .env
+
+# 构建产物
+dist/
+coverage/
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 环境变量
+.env.*
+!.env.example
+
+# macOS LaunchAgent 生成的 plist
+*.plist
+
+# 临时文件
+*.tmp
+*.tmp.*
+
+# npm
+npm-debug.log*
+.npm
+
+# claude 本地配置
+.claude/
+
+# 系统文件
+Thumbs.db
