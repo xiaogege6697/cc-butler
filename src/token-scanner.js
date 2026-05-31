@@ -155,7 +155,7 @@ function createTokenScanner(config, bus) {
       } catch (err) {
         // 单个 deployment 失败不影响其他
         const previous = _lastResult?.deployments?.[dep.id] || readCache()?.deployments?.[dep.id];
-        if (previous && previous.source !== 'error') {
+        if (previous && previous.source !== 'error' && previous.source !== 'mock') {
           // Keep previous data but mark as stale
           cache.deployments[dep.id] = {
             ...previous,
@@ -236,7 +236,7 @@ function createTokenScanner(config, bus) {
       return balanceData;
     } catch (err) {
       const previous = _lastResult?.deployments?.[dep.id] || readCache()?.deployments?.[dep.id];
-      const errorResult = (previous && previous.source !== 'error')
+      const errorResult = (previous && previous.source !== 'error' && previous.source !== 'mock')
         ? { ...previous, stale: true, lastError: err.message, lastUpdated: now }
         : {
             balance: null, totalQuota: null, usedQuota: null,

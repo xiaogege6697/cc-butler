@@ -182,19 +182,35 @@
     var percent = 0;
     var barClass = 'dep-card__bar--gray';
     var consumedText = '暂无数据';
-    if (tokenData && tokenData.percentage != null) {
-      percent = Math.round(tokenData.percentage);
-      var currency = '';
-      if (tokenData.currency) {
-        if (tokenData.currency === 'CNY' || tokenData.currency === 'cny') currency = '¥';
-        else if (tokenData.currency === 'USD' || tokenData.currency === 'usd') currency = '$';
+    var staleHint = '';
+    if (tokenData) {
+      var isStale = tokenData.stale;
+      var src = tokenData.source || '';
+      if (src === 'mock') {
+        // 缓存的 mock 数据，显示"待配置"
+        consumedText = '待配置余额查询';
+        percent = 0;
+        barClass = 'dep-card__bar--gray';
+      } else if (src === 'error' || src === 'no-adapter') {
+        // 查询失败或无适配器
+        consumedText = src === 'no-adapter' ? '无适配器' : '查询失败';
+        percent = 0;
+        barClass = 'dep-card__bar--gray';
+      } else if (tokenData.percentage != null) {
+        percent = Math.round(tokenData.percentage);
+        var currency = '';
+        if (tokenData.currency) {
+          if (tokenData.currency === 'CNY' || tokenData.currency === 'cny') currency = '¥';
+          else if (tokenData.currency === 'USD' || tokenData.currency === 'usd') currency = '$';
+        }
+        var used = tokenData.usedQuota != null ? tokenData.usedQuota.toFixed(1) : '--';
+        var total = tokenData.totalQuota != null ? tokenData.totalQuota.toFixed(1) : '--';
+        consumedText = currency + used + ' / ' + total;
+        if (isStale) staleHint = ' <span title="数据可能过期" style="opacity:0.5">⏳</span>';
+        if (percent >= 80) barClass = 'dep-card__bar--red';
+        else if (percent >= 50) barClass = 'dep-card__bar--yellow';
+        else barClass = 'dep-card__bar--green';
       }
-      var used = tokenData.usedQuota != null ? tokenData.usedQuota.toFixed(1) : '--';
-      var total = tokenData.totalQuota != null ? tokenData.totalQuota.toFixed(1) : '--';
-      consumedText = currency + used + ' / ' + total;
-      if (percent >= 80) barClass = 'dep-card__bar--red';
-      else if (percent >= 50) barClass = 'dep-card__bar--yellow';
-      else barClass = 'dep-card__bar--green';
     }
 
     var stagingClass = isStaging ? ' dep-card--staging' : '';
@@ -216,7 +232,7 @@
         '<div class="dep-card__consumption">' +
           '<div class="dep-card__consumption-info">' +
             '<span class="dep-card__consumption-label">Token 消耗</span>' +
-            '<span class="dep-card__consumption-text">' + consumedText + '</span>' +
+            '<span class="dep-card__consumption-text">' + consumedText + staleHint + '</span>' +
           '</div>' +
           '<div class="dep-card__bar-wrap">' +
             '<div class="dep-card__bar ' + barClass + '" style="width:' + Math.max(2, percent) + '%"></div>' +
