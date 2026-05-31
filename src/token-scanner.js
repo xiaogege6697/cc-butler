@@ -52,8 +52,11 @@ function readCache() {
  * @param {EventEmitter} bus - config.bus 事件总线
  * @returns {{ start, stop, scan, getStatus, setCredentials, getCachedData }}
  */
+// 默认扫描间隔（分钟）
+const DEFAULT_SCAN_INTERVAL_MINUTES = 10;
+
 function createTokenScanner(config, bus) {
-  let _timer = null;
+  const _timers = new Map(); // deploymentId -> timeoutId
   let _lastResult = null; // 内存缓存
   const _credentials = new Map(); // deploymentId -> { username, password, cookie }
 
@@ -122,7 +125,8 @@ function createTokenScanner(config, bus) {
    * 执行一次完整的扫描流程
    */
   async function doScan() {
-    const deployments = config.getDeployments();
+    // 只扫活跃区
+    const deployments = config.getDeployments().filter(d => d.enabled);
     const cfg = config.getConfig();
     const alertThreshold = cfg.budget?.alertThreshold ?? 0.8;
 
@@ -188,7 +192,71 @@ function createTokenScanner(config, bus) {
   // =========================================================================
 
   /**
-   * 启动定时扫描
+   * 扫描单个 deployment（用于按 deployment 独立定时）
+   * @param {string} deploymentId
+   * @returns {Promise<object>} 该 deployment 的扫描结果
+   */
+  async function scanSingle(deploymentId) {
+    const dep = config.getDeployments().find(d => d.id === deploymentId && d.enabled);
+    if (!dep) {
+      console.warn(`[token-scanner] deployment ${deploymentId} 不存在，跳过`);
+      return null;
+    }
+
+    const cfg = config.getConfig();
+    const alertThreshold = cfg.budget?.alertThreshold ?? 0.8;
+    const now = new Date().toISOString();
+
+    try {
+      const balanceData = await fetchBalance(dep);
+      balanceData.lastUpdated = now;
+
+      // 合并到内存缓存
+      if (!_lastResult) _lastResult = { lastScanAt: now, deployments: {} };
+      _lastResult.lastScanAt = now;
+      _lastResult.deployments[dep.id] = balanceData;
+
+      // 原子写入磁盘
+      atomicWrite(CACHE_PATH, _lastResult);
+
+      // 检查阈值告警
+      if (checkAlert(dep.id, balanceData, alertThreshold)) {
+        bus.emit('token.alert', {
+          deploymentId: dep.id,
+          percentage: balanceData.percentage,
+          threshold: alertThreshold,
+          data: balanceData,
+        });
+      }
+
+      // 通知 Dashboard
+      bus.emit('token.updated', _lastResult);
+
+      console.log(`[token-scanner] ${dep.id} 扫描完成`);
+      return balanceData;
+    } catch (err) {
+      const previous = _lastResult?.deployments?.[dep.id] || readCache()?.deployments?.[dep.id];
+      const errorResult = (previous && previous.source !== 'error')
+        ? { ...previous, stale: true, lastError: err.message, lastUpdated: now }
+        : {
+            balance: null, totalQuota: null, usedQuota: null,
+            percentage: null, currency: null, plan: null, resetAt: null,
+            source: 'error', lastUpdated: now,
+            raw: { error: err.message },
+          };
+
+      if (!_lastResult) _lastResult = { lastScanAt: now, deployments: {} };
+      _lastResult.deployments[dep.id] = errorResult;
+      atomicWrite(CACHE_PATH, _lastResult);
+      bus.emit('token.updated', _lastResult);
+
+      console.error(`[token-scanner] ${dep.id} 扫描失败:`, err.message);
+      return errorResult;
+    }
+  }
+
+  /**
+   * 启动定时扫描（每个 deployment 独立间隔）
    */
   function start() {
     stop(); // 先清理已有的定时器
@@ -204,37 +272,57 @@ function createTokenScanner(config, bus) {
     const customAdapters = cfg.tokenScanner?.customAdapters || [];
     registry.loadCustomAdapters(customAdapters);
 
-    const intervalHours = scannerConfig.intervalHours || 6;
-    const intervalMs = intervalHours * 60 * 60 * 1000;
+    // 只扫活跃区（enabled=true），暂存区不扫
+    const deployments = config.getDeployments().filter(d => d.enabled);
 
-    console.log(`[token-scanner] 定时扫描已启动，间隔 ${intervalHours} 小时`);
-
-    // 启动时立即扫描一次
+    // 启动时先全量扫一次
     doScan().catch((err) => {
       console.error('[token-scanner] 初始扫描失败:', err.message);
     });
 
-    _timer = setInterval(() => {
-      doScan().catch((err) => {
-        console.error('[token-scanner] 定时扫描失败:', err.message);
-      });
-    }, intervalMs);
-
-    // 防止定时器阻止进程退出
-    if (_timer.unref) {
-      _timer.unref();
+    // 为每个 deployment 启动独立定时器
+    for (const dep of deployments) {
+      scheduleDeployment(dep);
     }
+
+    console.log(`[token-scanner] 定时扫描已启动，${deployments.length} 个活跃 deployment，默认间隔 ${DEFAULT_SCAN_INTERVAL_MINUTES} 分钟`);
+  }
+
+  /**
+   * 为单个 deployment 调度定时扫描
+   * 使用 setTimeout 链式调用，避免重叠
+   */
+  function scheduleDeployment(dep) {
+    const minutes = dep.scanIntervalMinutes || DEFAULT_SCAN_INTERVAL_MINUTES;
+    const ms = minutes * 60 * 1000;
+
+    const timerId = setTimeout(async () => {
+      try {
+        // 只扫描这一个 deployment
+        await scanSingle(dep.id);
+      } catch (err) {
+        console.error(`[token-scanner] 定时扫描 ${dep.id} 失败:`, err.message);
+      }
+      // 扫完后重新调度（deployment 可能已被删除或移入暂存区）
+      const current = config.getDeployments().find(d => d.id === dep.id && d.enabled);
+      if (current) {
+        scheduleDeployment(current);
+      }
+    }, ms);
+
+    if (timerId.unref) timerId.unref();
+    _timers.set(dep.id, timerId);
   }
 
   /**
    * 停止定时扫描
    */
   function stop() {
-    if (_timer) {
-      clearInterval(_timer);
-      _timer = null;
-      console.log('[token-scanner] 定时扫描已停止');
+    for (const [depId, timerId] of _timers) {
+      clearTimeout(timerId);
     }
+    _timers.clear();
+    console.log('[token-scanner] 定时扫描已停止');
   }
 
   /**

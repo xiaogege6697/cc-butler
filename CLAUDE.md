@@ -38,11 +38,15 @@ src/providers/ 下，每个平台一个 adapter：
 - Phase 5: Skill 三角色分离（scorer/evolver/installer）+ Dashboard Skill 库 UI + 拖拽打磨
 - Phase 6: Dashboard 请求详情页（Modal + JSON 查看器 + Token 条形图）
 - Phase 7: 视觉重设计（暗色漫画风 → 暖白磨砂卡通风 + Token 消耗 + 路由双区拖拽）
+- Phase 8: Token-scanner 按 deployment 独立扫描间隔（默认 10 分钟，scanIntervalMinutes 字段）
+- Skill-evolver 改走本地代理（localhost:8118），复用路由链路，移除 CLI spawn 依赖
 
 ## 待办（后续 Phase）
-- Skill-evolver 接入真实 Claude API（当前用 CLI spawn）
-- Token-scanner 定时扫描间隔按 provider 自定义（不同平台刷新周期不同）
-- Gemini adapter（如需要）
+
+无明确待办。以下为可选优化方向：
+- 补充核心模块测试覆盖
+- 提供 data/config.json.example 示例配置
+- 审查静默 catch 块，补充日志
 
 ## 已砍掉
 - ~~DashScope（阿里百炼）adapter~~ — 内部 RPC + cookie，复杂度高，用得少

@@ -3,43 +3,74 @@
 /**
  * Skill 进化模块
  *
- * 从 skill-evaluator.js 提取的进化逻辑。
- * 依赖 scorer 模块进行评估。
+ * 通过本地代理（localhost:8118）调用 Claude API 执行进化，
+ * 复用已有的路由、负载均衡和健康检查。
  */
 
-const { spawn } = require('child_process');
+const http = require('http');
 
 // ---------------------------------------------------------------------------
 // 辅助函数
 // ---------------------------------------------------------------------------
 
 /**
- * spawn claude CLI 执行 prompt
- * @param {string} prompt - 提示词
- * @param {string} [stdinContent] - 通过 stdin 传入的内容
- * @param {number} [timeout=120000] - 超时毫秒
- * @returns {Promise<string>} stdout 输出
+ * 通过本地代理调用 Claude Messages API
+ * @param {string} systemPrompt - 系统提示词
+ * @param {string} userContent - 用户内容
+ * @param {number} [timeout=180000] - 超时毫秒
+ * @returns {Promise<string>} 模型回复文本
  */
-function runClaudeCLI(prompt, stdinContent, timeout = 120000) {
+function runLocalProxy(systemPrompt, userContent, timeout = 180000) {
+  const port = process.env.PORT || 8118;
+
   return new Promise((resolve, reject) => {
-    const proc = spawn('claude', ['-p', prompt], { timeout });
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', d => { stdout += d; });
-    proc.stderr.on('data', d => { stderr += d; });
-
-    proc.on('close', code => {
-      if (code === 0) resolve(stdout.trim());
-      else reject(new Error(stderr || `claude CLI 退出码 ${code}`));
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8192,
+      stream: false,
+      system: systemPrompt,
+      messages: [
+        { role: 'user', content: userContent },
+      ],
     });
 
-    proc.on('error', err => reject(err));
+    const req = http.request({
+      hostname: 'localhost',
+      port,
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'anthropic-version': '2023-06-01',
+      },
+      timeout,
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`本地代理返回 ${res.statusCode}: ${data.slice(0, 200)}`));
+          return;
+        }
+        try {
+          const json = JSON.parse(data);
+          const text = json.content?.[0]?.text || '';
+          resolve(text.trim());
+        } catch (e) {
+          reject(new Error(`解析代理响应失败: ${e.message}`));
+        }
+      });
+    });
 
-    if (stdinContent) {
-      proc.stdin.write(stdinContent);
-      proc.stdin.end();
-    }
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('本地代理请求超时'));
+    });
+
+    req.write(body);
+    req.end();
   });
 }
 
@@ -99,7 +130,7 @@ function createSkillEvolver(skillStore, bus, scorer) {
       (e.totalScore || 0) > (best.totalScore || 0) ? e : best
     , evaluations[0]);
 
-    // 5. 调用 claude CLI 生成整合方案
+    // 5. 通过本地代理调用 Claude 生成整合方案
     const evolvePrompt = [
       '你是一个 Claude Code Skill 进化专家。',
       '以下是 ' + skills.length + ' 个同类型 skill 的内容。',
@@ -116,13 +147,13 @@ function createSkillEvolver(skillStore, bus, scorer) {
 
     let evolvedContent;
     try {
-      evolvedContent = await runClaudeCLI(evolvePrompt, combinedContent, 180000);
+      evolvedContent = await runLocalProxy(evolvePrompt, combinedContent);
     } catch (err) {
-      throw new Error(`Claude CLI 进化失败: ${err.message}`);
+      throw new Error(`Skill 进化失败: ${err.message}`);
     }
 
     if (!evolvedContent || evolvedContent.length < 100) {
-      throw new Error('Claude CLI 返回内容过短，进化失败');
+      throw new Error('进化结果内容过短，可能失败');
     }
 
     // 6. 对新内容运行评估（使用 scorer.evaluateContent）
