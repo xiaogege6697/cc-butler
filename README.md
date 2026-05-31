@@ -2,7 +2,7 @@
 
 > 🏠 Claude Code 智能管家 — 智能路由 + Token 监控 + Skill 库
 
-轻量级 Node.js 代理，替代 Python litellm + PostgreSQL。单进程、零外部数据库、漫画风 Dashboard。
+轻量级 Node.js 代理，替代 Python litellm + PostgreSQL。单进程、零外部数据库、暖白磨砂卡通风 Dashboard。
 
 <!-- TODO: 添加 Dashboard 截图 -->
 <!-- ![Dashboard](docs/screenshot-dashboard.png) -->
@@ -23,15 +23,15 @@
 ### 🔮 Skill 库
 - 自动/手动搜集 GitHub 最新 Claude Code skill
 - 9 维度评估（参考 darwin-skill）
-- 棘轮机制进化（spawn Claude CLI 执行）
+- 棘轮机制进化（通过本地代理调用 Claude）
 - 一键安装到 `~/.claude/skills/`
 
-### 🎨 漫画风 Dashboard
-- 大圆角 + 粗描边 + 半色调网点
-- Toggle 开关（弹跳动画）
-- 渐变进度条（光泽扫描动画）
-- 表情化状态（😊⚠️💥❄️）
-- 暗色主题
+### 🎨 Dashboard
+- 暖白磨砂卡通风设计（四主题：明亮/暗色/漫画/线条小狗）
+- 路由双区拖拽排序（活跃区 + 暂存区）
+- Token 消耗进度条整合到路由卡片
+- 请求详情 Modal（概览/请求体/响应体/Headers + JSON 高亮）
+- SSE 实时事件推送
 
 ## 🚀 快速开始
 
@@ -83,9 +83,12 @@ src/
 ├── proxy.js            # 代理转发 + SSE 双写
 ├── capture.js          # 环形缓冲区 + EventBus
 ├── admin.js            # REST API + SSE
-├── token-scanner.js    # Provider 余额抓取
+├── token-scanner.js    # Provider 余额抓取（per-deployment 独立间隔）
 ├── skill-hunter.js     # Skill 搜集引擎
-├── skill-evaluator.js  # Skill 评估 + 进化
+├── skill-evaluator.js  # Skill 评估门面
+├── skill-scorer.js     # Skill 9 维评分
+├── skill-evolver.js    # Skill 进化（本地代理调用 Claude）
+├── skill-installer.js  # Skill 安装到 ~/.claude/skills/
 ├── skill-store.js      # Skill JSON 持久化
 └── web/                # Dashboard UI
     ├── index.html

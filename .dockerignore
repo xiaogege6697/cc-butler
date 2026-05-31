@@ -1,0 +1,12 @@
+test/
+.git/
+.github/
+node_modules/
+.claude/
+*.md
+*.log
+.DS_Store
+.env
+.env.*
+data/
+scripts/
